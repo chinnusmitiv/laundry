@@ -1,0 +1,66 @@
+/* ChaseLaundry website — desktop-first responsive */
+body { background: #fff; }
+.web-wrap { max-width: 1180px; margin: 0 auto; padding: 0 24px; }
+
+/* nav */
+.nav { position: sticky; top: 0; z-index: 40; background: rgba(29,41,81,.92); backdrop-filter: blur(10px); }
+.nav-inner { display: flex; align-items: center; justify-content: space-between; height: 72px; }
+.nav-links { display: flex; align-items: center; gap: 28px; }
+.nav-links a { color: rgba(255,255,255,.7); font-weight: 600; font-size: 15px; }
+.nav-links a:hover { color: #fff; }
+.nav-cta { background: var(--lime); color: var(--navy); font-weight: 800; padding: 10px 20px; border-radius: 11px; font-size: 14px; }
+
+/* hero */
+.hero { background: var(--navy); color: #fff; position: relative; overflow: hidden; }
+.hero-ring { position: absolute; border-radius: 50%; border: 1px solid rgba(199,255,51,.08); }
+.hero-grid { display: grid; grid-template-columns: 1.1fr 1fr; gap: 40px; align-items: center; padding: 80px 0 90px; position: relative; }
+.hero h1 { font-size: 62px; font-weight: 900; letter-spacing: -2.5px; line-height: .98; }
+.hero h1 .g { color: var(--lime); }
+.hero p { font-size: 19px; color: rgba(255,255,255,.6); margin: 22px 0 32px; max-width: 460px; line-height: 1.6; }
+
+/* section */
+.section { padding: 84px 0; }
+.section-eyebrow { font-size: 12px; font-weight: 800; letter-spacing: 2.5px; text-transform: uppercase; color: var(--lime-d); }
+.section-title { font-size: 40px; font-weight: 900; letter-spacing: -1.2px; margin: 10px 0 12px; }
+.section-sub { font-size: 17px; color: var(--gray); max-width: 560px; }
+.bg-light { background: var(--light); }
+.bg-navy { background: var(--navy); color: #fff; }
+
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
+.grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+
+.feat { background: #fff; border-radius: 18px; padding: 28px; box-shadow: var(--shadow-sm); }
+.feat .ic { width: 52px; height: 52px; border-radius: 14px; background: var(--lime-pale); display: flex; align-items: center; justify-content: center; font-size: 26px; margin-bottom: 16px; }
+.feat h3 { font-size: 19px; font-weight: 800; margin-bottom: 8px; }
+.feat p { color: var(--gray); font-size: 14px; line-height: 1.6; }
+
+.step { text-align: center; }
+.step-n { width: 56px; height: 56px; border-radius: 56px; background: var(--navy); color: var(--lime); font-weight: 900; font-size: 22px; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; }
+
+.price-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; align-items: stretch; }
+.price { background: #fff; border-radius: 20px; padding: 32px; border: 2px solid var(--gray3); display: flex; flex-direction: column; }
+.price.feat-plan { border-color: var(--navy); box-shadow: var(--shadow); position: relative; }
+.price .amt { font-size: 44px; font-weight: 900; letter-spacing: -1.5px; }
+.price ul { list-style: none; margin: 18px 0; display: flex; flex-direction: column; gap: 10px; flex: 1; }
+.price li { display: flex; gap: 10px; font-size: 14px; color: var(--gray); }
+.price li::before { content: '✓'; color: var(--lime-d); font-weight: 900; }
+
+.foot { background: var(--navy2); color: rgba(255,255,255,.55); padding: 56px 0 36px; }
+.foot-grid { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 30px; }
+.foot a { display: block; color: rgba(255,255,255,.5); font-size: 14px; padding: 5px 0; }
+.foot a:hover { color: var(--lime); }
+
+/* app pages (order/account) */
+.app-page { min-height: calc(100vh - 72px); background: var(--light); padding: 40px 0 80px; }
+.panel { background: #fff; border-radius: 18px; padding: 26px; box-shadow: var(--shadow-sm); }
+.two-col { display: grid; grid-template-columns: 1fr 380px; gap: 24px; align-items: start; }
+.tabs { display: flex; gap: 6px; background: #fff; padding: 6px; border-radius: 14px; box-shadow: var(--shadow-sm); margin-bottom: 24px; width: fit-content; }
+.tabs button { padding: 10px 18px; border-radius: 10px; font-weight: 700; font-size: 14px; color: var(--gray); }
+.tabs button.active { background: var(--navy); color: #fff; }
+
+@media (max-width: 900px) {
+  .hero-grid, .two-col { grid-template-columns: 1fr; }
+  .hero h1 { font-size: 42px; }
+  .grid-3, .grid-4, .price-grid, .foot-grid { grid-template-columns: 1fr; }
+  .nav-links a:not(.nav-cta) { display: none; }
+}

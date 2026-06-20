@@ -1,0 +1,23 @@
+{
+  "name": "chaselaundry",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "server",
+    "shared",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,customer,driver,ops,web -c green,magenta,cyan,yellow,blue \"npm:dev:server\" \"npm:dev:customer\" \"npm:dev:driver\" \"npm:dev:ops\" \"npm:dev:web\"",
+    "dev:server": "npm -w server run dev",
+    "dev:customer": "npm -w @chaselaundry/customer run dev",
+    "dev:driver": "npm -w @chaselaundry/driver run dev",
+    "dev:ops": "npm -w @chaselaundry/ops run dev",
+    "dev:web": "npm -w @chaselaundry/web run dev",
+    "seed": "npm -w server run seed"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}

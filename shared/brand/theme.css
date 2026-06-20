@@ -1,0 +1,101 @@
+/* ChaseLaundry brand tokens — single source of truth for all three apps */
+@import url('https://fonts.googleapis.com/css2?family=Satoshi:wght@300;400;500;600;700;800;900&display=swap');
+
+:root {
+  --lime: #C7FF33;
+  --lime-d: #A8D400;
+  --lime-pale: #F0FFD0;
+  --navy: #1D2951;
+  --navy2: #162040;
+  --navy3: #253470;
+  --white: #FFFFFF;
+  --light: #F5F7FA;
+  --text: #1F2937;
+  --gray: #6B7280;
+  --gray2: #9CA3AF;
+  --gray3: #E5E7EB;
+  --bg: #E8ECF6;
+  --font: 'Satoshi', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --radius: 18px;
+  --shadow: 0 18px 50px rgba(29, 41, 81, 0.14);
+  --shadow-sm: 0 4px 16px rgba(29, 41, 81, 0.08);
+  --ok: #16A34A;
+  --warn: #F59E0B;
+  --danger: #EF4444;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body, #root { height: 100%; }
+body {
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+a { color: inherit; text-decoration: none; }
+button { font-family: inherit; cursor: pointer; border: none; background: none; }
+input, textarea, select { font-family: inherit; }
+
+/* phone-frame shell used by customer + driver apps */
+.cl-phone {
+  max-width: 460px;
+  margin: 0 auto;
+  min-height: 100vh;
+  background: var(--light);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--shadow);
+}
+.cl-scroll { flex: 1; overflow-y: auto; padding-bottom: 96px; }
+
+/* buttons */
+.cl-btn {
+  background: var(--navy); color: #fff; font-weight: 800; font-size: 15px;
+  padding: 15px 22px; border-radius: 14px; width: 100%;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  transition: transform .08s ease, opacity .15s ease;
+}
+.cl-btn:active { transform: scale(.98); }
+.cl-btn:disabled { opacity: .4; cursor: not-allowed; }
+.cl-btn-lime { background: var(--lime); color: var(--navy); }
+.cl-btn-ghost { background: rgba(29,41,81,.06); color: var(--navy); }
+.cl-btn-sm { padding: 10px 16px; font-size: 13px; width: auto; border-radius: 11px; }
+
+/* cards */
+.cl-card { background: #fff; border-radius: var(--radius); padding: 18px; box-shadow: var(--shadow-sm); }
+/* .cl-card + .cl-card { margin-top: 14px; } */
+
+/* labels & chips */
+.cl-eyebrow { font-size: 10px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase; color: var(--gray2); }
+.cl-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11px; font-weight: 800; letter-spacing: .3px;
+  padding: 5px 11px; border-radius: 999px; background: var(--lime-pale); color: var(--navy);
+}
+.cl-chip-navy { background: var(--navy); color: var(--lime); }
+.cl-chip-gray { background: var(--gray3); color: var(--gray); }
+
+/* form fields */
+.cl-field { width: 100%; padding: 14px 16px; border-radius: 12px; border: 1.5px solid var(--gray3); background: #fff; font-size: 15px; }
+.cl-field:focus { outline: none; border-color: var(--navy); }
+.cl-label { font-size: 12px; font-weight: 700; color: var(--gray); margin-bottom: 6px; display: block; }
+
+/* utility */
+.cl-row { display: flex; align-items: center; }
+.cl-between { display: flex; align-items: center; justify-content: space-between; }
+.cl-muted { color: var(--gray); }
+.cl-divider { height: 1px; background: var(--gray3); margin: 14px 0; }
+.cl-skel { background: linear-gradient(90deg,#eee,#f5f5f5,#eee); background-size: 200% 100%; animation: cl-sk 1.2s infinite; border-radius: 8px; }
+@keyframes cl-sk { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+
+/* OneMap / Leaflet markers */
+.leaflet-container { font-family: var(--font); background: #dde3f0; }
+.cl-leaflet-icon { background: none; border: none; }
+.cl-pin { font-size: 24px; line-height: 1; filter: drop-shadow(0 2px 3px rgba(0,0,0,.4)); }
+.cl-pulse { width: 18px; height: 18px; border-radius: 50%; background: var(--lime); border: 2px solid var(--navy); animation: clpulse 1.6s infinite; }
+@keyframes clpulse {
+  0% { box-shadow: 0 0 0 0 rgba(199,255,51,.55); }
+  70% { box-shadow: 0 0 0 16px rgba(199,255,51,0); }
+  100% { box-shadow: 0 0 0 0 rgba(199,255,51,0); }
+}
