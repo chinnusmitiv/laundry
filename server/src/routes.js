@@ -1,4 +1,5 @@
 import { nanoid } from 'nanoid';
+import { randomInt } from 'node:crypto';
 import { db, STATUS_FLOW, STATUS_LABEL, GARMENT_FLOW } from './db.js';
 import { payments, google, notify, stepToward, distanceKm } from './services.js';
 import { searchPlaces, searchOneMap } from './places.js';
@@ -6,9 +7,44 @@ import { searchPlaces, searchOneMap } from './places.js';
 const now = () => new Date().toISOString();
 const id = (p) => `${p}_${nanoid(8)}`;
 const PLATFORM_FEE = 99; // flat platform fee in cents
+const cardBrand = (digits) => (/^4/.test(digits) ? 'Visa' : /^5[1-5]/.test(digits) ? 'Mastercard' : /^3[47]/.test(digits) ? 'Amex' : 'Card');
+
+// ---- app settings (key/value JSON) ----
+const DEFAULT_ROUTING = { auto_route: true, strategy: 'nearest', default_facility_id: null, rules: [] };
+const getSetting = (key) => { const r = db.prepare('SELECT value FROM settings WHERE key = ?').get(key); try { return r ? JSON.parse(r.value) : null; } catch { return null; } };
+const setSetting = (key, val) => db.prepare('INSERT INTO settings (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, JSON.stringify(val));
+
+// pick a warehouse for an order from its address, per the routing config
+function autoRouteFacility(addr) {
+  const cfg = { ...DEFAULT_ROUTING, ...(getSetting('routing') || {}) };
+  if (!cfg.auto_route) return null;
+  const active = db.prepare('SELECT * FROM facilities WHERE active = 1').all();
+  const byId = (fid) => active.find((f) => f.id === fid)?.id || null;
+  if (cfg.strategy === 'default') return byId(cfg.default_facility_id);
+  if (cfg.strategy === 'rules' && addr?.postcode) {
+    const hit = (cfg.rules || []).find((r) => r.prefix && String(addr.postcode).startsWith(String(r.prefix)));
+    if (hit) return byId(hit.facility_id);
+  }
+  if (cfg.strategy === 'nearest' && addr?.lat != null) {
+    let best = null, bestKm = Infinity;
+    for (const f of active) { if (f.lat == null) continue; const km = distanceKm(addr, f); if (km < bestKm) { bestKm = km; best = f; } }
+    if (best) return best.id;
+  }
+  return byId(cfg.default_facility_id); // fallback
+}
+// promotional top-up bonus tiers — bigger top-ups earn more bonus credit
+const TOPUP_TIERS = [[20000, 20], [10000, 18], [5000, 12], [2000, 5]]; // [minCents, bonusPct]
+function topupBonus(amount) {
+  for (const [min, pct] of TOPUP_TIERS) if (amount >= min) return { bonus: Math.floor((amount * pct) / 100), pct };
+  return { bonus: 0, pct: 0 };
+}
 
 // ---- query helpers ----
-const getUser = (uid) => db.prepare('SELECT * FROM users WHERE id = ?').get(uid);
+const getUser = (uid) => {
+  const u = db.prepare('SELECT * FROM users WHERE id = ?').get(uid);
+  if (u) delete u.password_hash; // never expose the password hash to clients
+  return u;
+};
 const balanceOf = (uid) =>
   db.prepare('SELECT COALESCE(SUM(amount_cents),0) b FROM credits WHERE user_id = ?').get(uid).b;
 const activeSub = (uid) =>
@@ -65,13 +101,61 @@ export function registerRoutes(app, io) {
     const rows = role
       ? db.prepare('SELECT * FROM users WHERE role = ? ORDER BY name').all(role)
       : db.prepare('SELECT * FROM users ORDER BY role, name').all();
-    res.json(rows);
+    res.json(rows.map((u) => { delete u.password_hash; return u; }));
   });
   app.get('/api/users/:id', (req, res) => res.json(getUser(req.params.id) || {}));
   app.get('/api/catalog', (_req, res) => res.json(db.prepare('SELECT * FROM catalog ORDER BY category, name').all()));
 
   // warehouses
   app.get('/api/facilities', (_req, res) => res.json(db.prepare('SELECT * FROM facilities WHERE active = 1 ORDER BY name').all()));
+
+  // ---- routing configuration ----
+  app.get('/api/ops/settings/routing', (_req, res) => res.json({ ...DEFAULT_ROUTING, ...(getSetting('routing') || {}) }));
+  app.post('/api/ops/settings/routing', (req, res) => {
+    const cur = { ...DEFAULT_ROUTING, ...(getSetting('routing') || {}) };
+    const next = {
+      auto_route: req.body.auto_route !== undefined ? !!req.body.auto_route : cur.auto_route,
+      strategy: req.body.strategy || cur.strategy,
+      default_facility_id: req.body.default_facility_id !== undefined ? (req.body.default_facility_id || null) : cur.default_facility_id,
+      rules: Array.isArray(req.body.rules) ? req.body.rules.filter((r) => r.prefix && r.facility_id) : cur.rules,
+    };
+    setSetting('routing', next);
+    res.json(next);
+  });
+
+  // ---- HQ warehouse management ----
+  app.get('/api/ops/facilities', (_req, res) => {
+    const rows = db.prepare('SELECT * FROM facilities ORDER BY name').all();
+    res.json(rows.map((f) => ({
+      ...f,
+      active_orders: db.prepare("SELECT COUNT(*) c FROM orders WHERE facility_id = ? AND status NOT IN ('completed','cancelled')").get(f.id).c,
+    })));
+  });
+
+  app.post('/api/ops/facilities', (req, res) => {
+    const b = req.body || {};
+    const name = String(b.name || '').trim();
+    if (!name) return res.status(400).json({ error: 'Warehouse name is required.' });
+    const s = (v) => String(v || '').trim() || null;
+    const fid = id('wh');
+    const code = s(b.code) || ('WH-' + name.replace(/[^A-Za-z]/g, '').slice(0, 2).toUpperCase());
+    db.prepare('INSERT INTO facilities (id,code,name,line1,area,postcode,lat,lng,phone,capacity_kg,active) VALUES (?,?,?,?,?,?,?,?,?,?,1)')
+      .run(fid, code, name, s(b.line1), s(b.area), s(b.postcode), b.lat ?? null, b.lng ?? null, s(b.phone), Math.round(Number(b.capacity_kg) || 500));
+    io.to('role:ops').emit('facility:new', { id: fid });
+    res.json(db.prepare('SELECT * FROM facilities WHERE id = ?').get(fid));
+  });
+
+  app.post('/api/ops/facilities/:id', (req, res) => {
+    const f = db.prepare('SELECT * FROM facilities WHERE id = ?').get(req.params.id);
+    if (!f) return res.status(404).json({ error: 'not found' });
+    const b = req.body || {};
+    for (const k of ['name', 'code', 'line1', 'area', 'postcode', 'phone']) {
+      if (b[k] !== undefined) db.prepare(`UPDATE facilities SET ${k} = ? WHERE id = ?`).run(String(b[k]).trim() || null, f.id);
+    }
+    if (b.capacity_kg !== undefined) db.prepare('UPDATE facilities SET capacity_kg = ? WHERE id = ?').run(Math.round(Number(b.capacity_kg) || 0), f.id);
+    if (b.active !== undefined) db.prepare('UPDATE facilities SET active = ? WHERE id = ?').run(b.active ? 1 : 0, f.id);
+    res.json(db.prepare('SELECT * FROM facilities WHERE id = ?').get(f.id));
+  });
 
   // Singapore address autocomplete — real OneMap, with local dataset fallback
   app.get('/api/places/search', async (req, res) => {
@@ -101,11 +185,11 @@ export function registerRoutes(app, io) {
   // add a saved address (from a places-autocomplete selection)
   app.post('/api/customers/:id/addresses', (req, res) => {
     const uid = req.params.id;
-    const { label, line1, line2, city, postcode, lat, lng, make_default } = req.body;
+    const { label, type, line1, line2, city, postcode, lat, lng, make_default } = req.body;
     const aid = id('adr');
     if (make_default) db.prepare('UPDATE addresses SET is_default = 0 WHERE user_id = ?').run(uid);
-    db.prepare('INSERT INTO addresses (id,user_id,label,line1,line2,city,postcode,lat,lng,is_default) VALUES (?,?,?,?,?,?,?,?,?,?)')
-      .run(aid, uid, label || 'New address', line1 ?? null, line2 ?? null, city || 'Singapore', postcode ?? null, lat ?? null, lng ?? null, make_default ? 1 : 0);
+    db.prepare('INSERT INTO addresses (id,user_id,label,type,line1,line2,city,postcode,lat,lng,is_default) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
+      .run(aid, uid, label || 'New address', type || 'home', line1 ?? null, line2 ?? null, city || 'Singapore', postcode ?? null, lat ?? null, lng ?? null, make_default ? 1 : 0);
     res.json(db.prepare('SELECT * FROM addresses WHERE id = ?').get(aid));
   });
 
@@ -123,32 +207,129 @@ export function registerRoutes(app, io) {
   // quote pricing without committing
   app.post('/api/orders/quote', (req, res) => res.json(priceOrder(req.body)));
 
-  // create order
+  // create order — consumer (app) OR B2B (warehouse, invoiced, no app account)
   app.post('/api/orders', (req, res) => {
-    const { customer_id, address_id, items = [], pickup_slot, return_slot, notes, use_credit } = req.body;
-    const pricing = priceOrder({ customer_id, items, use_credit });
+    let { customer_id, address_id, items = [], pickup_slot, return_slot, notes, use_credit, handover, handover_contact, facility_id, driver_id, business_name, business_phone } = req.body;
+
+    // B2B: no customer account — find-or-create a lightweight business client (role='business', no login)
+    const isB2B = !!(business_name && business_name.trim());
+    if (isB2B) {
+      const name = business_name.trim();
+      let biz = db.prepare("SELECT * FROM users WHERE role = 'business' AND LOWER(name) = LOWER(?)").get(name);
+      if (!biz) {
+        const bid = id('biz');
+        const avatar = name.split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
+        db.prepare('INSERT INTO users (id,role,name,email,phone,avatar,facility_id,created_at) VALUES (?,?,?,?,?,?,?,?)')
+          .run(bid, 'business', name, null, String(business_phone || '').trim() || null, avatar, null, now());
+        biz = getUser(bid);
+      } else if (business_phone) {
+        db.prepare('UPDATE users SET phone = ? WHERE id = ?').run(String(business_phone).trim(), biz.id);
+      }
+      customer_id = biz.id;
+      use_credit = false; // businesses are invoiced, no wallet
+    }
+
+    const pricing = priceOrder({ customer_id, items, use_credit, b2b: isB2B });
     const oid = id('ord');
     const code = `CL-${1000 + db.prepare('SELECT COUNT(*) c FROM orders').get().c + 50}`;
-    db.prepare(`INSERT INTO orders (id,code,customer_id,address_id,driver_id,status,pickup_slot,return_slot,notes,
+    // auto-route to a warehouse from the address if ops didn't pick one
+    if (!facility_id) {
+      const addr = address_id ? db.prepare('SELECT * FROM addresses WHERE id = ?').get(address_id) : null;
+      facility_id = autoRouteFacility(addr);
+    }
+    // B2B drops off at the warehouse → starts in processing flow; consumer flow starts at pickup
+    const status = driver_id ? 'assigned' : (isB2B && facility_id ? 'at_facility' : 'placed');
+    const paymentStatus = isB2B ? 'invoiced' : 'pending'; // B2B billed on terms, not pay-now
+    db.prepare(`INSERT INTO orders (id,code,customer_id,address_id,driver_id,facility_id,status,pickup_slot,return_slot,notes,handover,handover_contact,
         subtotal_cents,platform_fee_cents,delivery_fee_cents,discount_cents,credit_applied_cents,total_cents,payment_status,created_at,updated_at)
-      VALUES (?,?,?,?,NULL,'placed',?,?,?,?,?,?,?,?,?, 'pending', ?, ?)`)
-      .run(oid, code, customer_id, address_id ?? null, pickup_slot ?? null, return_slot ?? null, notes || '',
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, ?, ?, ?)`)
+      .run(oid, code, customer_id, address_id ?? null, driver_id ?? null, facility_id ?? null, status, pickup_slot ?? null, return_slot ?? null, notes || '', handover ?? null, handover_contact ?? null,
         pricing.subtotal_cents, pricing.platform_fee_cents, pricing.delivery_fee_cents,
-        pricing.discount_cents, pricing.credit_applied_cents, pricing.total_cents, now(), now());
+        pricing.discount_cents, pricing.credit_applied_cents, pricing.total_cents, paymentStatus, now(), now());
+    if (driver_id) io.to(`user:${driver_id}`).emit('job:assigned', fullOrder(oid));
     for (const it of items) {
       const cat = db.prepare('SELECT * FROM catalog WHERE id = ?').get(it.catalog_id);
       const line = lineTotal(cat, it);
       db.prepare('INSERT INTO order_items (id,order_id,catalog_id,name,qty,weight_kg,price_cents) VALUES (?,?,?,?,?,?,?)')
         .run(id('itm'), oid, it.catalog_id, cat?.name || it.name, it.qty || 1, it.weight_kg || null, line);
     }
-    // spend credit
-    if (pricing.credit_applied_cents > 0) {
-      db.prepare('INSERT INTO credits (id,user_id,amount_cents,type,reason,order_id,created_at) VALUES (?,?,?,?,?,?,?)')
-        .run(id('cr'), customer_id, -pricing.credit_applied_cents, 'spend', `Applied to ${code}`, oid, now());
+    // consumer-only: spend wallet credit + push an in-app notification (business has no app)
+    if (!isB2B) {
+      if (pricing.credit_applied_cents > 0) {
+        db.prepare('INSERT INTO credits (id,user_id,amount_cents,type,reason,order_id,created_at) VALUES (?,?,?,?,?,?,?)')
+          .run(id('cr'), customer_id, -pricing.credit_applied_cents, 'spend', `Applied to ${code}`, oid, now());
+      }
+      notify({ io, userId: customer_id, type: 'order', title: 'Order confirm liao 🎉', body: `${code} received! We assign a driver for you shortly, don't worry ah.`, orderId: oid });
     }
-    notify({ io, userId: customer_id, type: 'order', title: 'Order confirm liao 🎉', body: `${code} received! We assign a driver for you shortly, don't worry ah.`, orderId: oid });
     io.to('role:ops').emit('order:new', fullOrder(oid));
     res.json(fullOrder(oid));
+  });
+
+  // ---- HQ customer management ----
+  // all consumer customers with aggregates
+  app.get('/api/ops/customers', (_req, res) => {
+    const rows = db.prepare("SELECT * FROM users WHERE role = 'customer' ORDER BY name").all();
+    res.json(rows.map((u) => {
+      delete u.password_hash;
+      return {
+        ...u,
+        balance_cents: balanceOf(u.id),
+        orders: db.prepare('SELECT COUNT(*) c FROM orders WHERE customer_id = ?').get(u.id).c,
+        plan: activeSub(u.id)?.plan_name || 'Lite',
+      };
+    }));
+  });
+
+  // HQ creates a consumer customer (they can later log in via OTP with this email/phone)
+  app.post('/api/ops/customers', (req, res) => {
+    const name = String(req.body.name || '').trim();
+    const email = String(req.body.email || '').trim() || null;
+    const phone = String(req.body.phone || '').trim() || null;
+    if (!name) return res.status(400).json({ error: 'Name is required.' });
+    if (email && db.prepare("SELECT 1 FROM users WHERE role = 'customer' AND LOWER(email) = LOWER(?)").get(email)) return res.status(409).json({ error: 'A customer with this email already exists.' });
+    const uid = id('cus');
+    const avatar = name.split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
+    db.prepare('INSERT INTO users (id,role,name,email,phone,avatar,facility_id,created_at) VALUES (?,?,?,?,?,?,?,?)')
+      .run(uid, 'customer', name, email, phone, avatar, null, now());
+    db.prepare('INSERT INTO credits (id,user_id,amount_cents,type,reason,order_id,created_at) VALUES (?,?,?,?,?,?,?)')
+      .run(id('cr'), uid, 1000, 'signup', 'Welcome credit', null, now());
+    res.json(getUser(uid));
+  });
+
+  // ---- HQ B2B client management ----
+  app.get('/api/ops/businesses', (_req, res) => {
+    const rows = db.prepare("SELECT * FROM users WHERE role = 'business' ORDER BY name").all();
+    res.json(rows.map((u) => {
+      delete u.password_hash;
+      const agg = db.prepare("SELECT COUNT(*) c, COALESCE(SUM(total_cents),0) t FROM orders WHERE customer_id = ?").get(u.id);
+      const outstanding = db.prepare("SELECT COALESCE(SUM(total_cents),0) t FROM orders WHERE customer_id = ? AND payment_status != 'paid'").get(u.id).t;
+      return { ...u, orders: agg.c, billed_cents: agg.t, outstanding_cents: outstanding };
+    }));
+  });
+
+  app.post('/api/ops/businesses', (req, res) => {
+    const b = req.body || {};
+    const name = String(b.name || '').trim();
+    if (!name) return res.status(400).json({ error: 'Business name is required.' });
+    if (db.prepare("SELECT 1 FROM users WHERE role = 'business' AND LOWER(name) = LOWER(?)").get(name)) return res.status(409).json({ error: 'This business already exists.' });
+    const bid = id('biz');
+    const avatar = name.split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
+    const s = (v) => String(v || '').trim() || null;
+    db.prepare('INSERT INTO users (id,role,name,email,phone,avatar,address,contact_person,gst_no,payment_terms,facility_id,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
+      .run(bid, 'business', name, s(b.email), s(b.phone), avatar, s(b.address), s(b.contact_person), s(b.gst_no), s(b.payment_terms) || 'Net 30', null, now());
+    res.json(getUser(bid));
+  });
+
+  // update a client's profile (B2B details)
+  app.post('/api/ops/clients/:id', (req, res) => {
+    const u = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
+    if (!u) return res.status(404).json({ error: 'not found' });
+    const b = req.body || {};
+    const fields = ['name', 'email', 'phone', 'address', 'contact_person', 'gst_no', 'payment_terms'];
+    for (const f of fields) {
+      if (b[f] !== undefined) db.prepare(`UPDATE users SET ${f} = ? WHERE id = ?`).run(String(b[f]).trim() || null, u.id);
+    }
+    res.json(getUser(u.id));
   });
 
   app.post('/api/orders/:id/pay', (req, res) => {
@@ -160,12 +341,61 @@ export function registerRoutes(app, io) {
     res.json({ ok: true, payment: pay, order: broadcastOrder(io, o.id) });
   });
 
+  // ---- Stripe-shaped payment with simulated 3D Secure (SCA) ----
+  // Generic: the client runs this to "charge a card"; the actual business
+  // action (mark order paid / activate subscription) is a separate call.
+  app.post('/api/payments/intent', (req, res) => {
+    res.json(payments.createIntent({ amountCents: req.body.amount_cents || 0, description: req.body.description || 'Payment' }));
+  });
+
+  app.post('/api/payments/confirm', (req, res) => {
+    const digits = String(req.body.card || '').replace(/\D/g, '');
+    const code = String(req.body.code || '').trim();
+    if (digits.length < 12) return res.status(400).json({ status: 'failed', error: 'Enter a valid card number.' });
+
+    // Stripe-style test cards
+    if (digits === '4000000000009995') return res.status(402).json({ status: 'failed', error: 'Your card was declined (insufficient funds).' });
+    const needs3ds = digits === '4000002500003155';
+
+    // step 1 — card needs Strong Customer Authentication
+    if (needs3ds && !code) {
+      return res.json({
+        status: 'requires_action',
+        next_action: 'use_stripe_sdk',
+        auth: { bank: 'ChaseBank', brand: cardBrand(digits), masked: digits.slice(-4), demo_code: String(randomInt(0, 1000000)).padStart(6, '0') },
+      });
+    }
+    // step 2 — authentication submitted
+    if (needs3ds && !/^\d{6}$/.test(code)) {
+      return res.status(401).json({ status: 'failed', error: 'Authentication failed — enter the 6-digit code.' });
+    }
+    const pay = payments.charge({ orderId: 'pay', amountCents: req.body.amount_cents || 0, customer: { email: req.body.email } });
+    res.json({ status: 'succeeded', payment: pay, brand: cardBrand(digits), last4: digits.slice(-4) });
+  });
+
   // wallet / credits
   app.get('/api/customers/:id/credits', (req, res) => {
     res.json({
       balance_cents: balanceOf(req.params.id),
       ledger: db.prepare('SELECT * FROM credits WHERE user_id = ? ORDER BY created_at DESC').all(req.params.id),
     });
+  });
+
+  // top up wallet credit (after a Stripe payment) — with promotional bonus tiers
+  app.post('/api/customers/:id/topup', (req, res) => {
+    const uid = req.params.id;
+    const amount = Math.max(0, Math.round(Number(req.body.amount_cents) || 0));
+    if (amount < 500) return res.status(400).json({ error: 'Minimum top-up is S$5.' });
+    const { bonus, pct } = topupBonus(amount);
+    payments.charge({ orderId: 'topup', amountCents: amount, customer: getUser(uid) });
+    db.prepare('INSERT INTO credits (id,user_id,amount_cents,type,reason,order_id,created_at) VALUES (?,?,?,?,?,?,?)')
+      .run(id('cr'), uid, amount, 'topup', 'Wallet top-up', null, now());
+    if (bonus > 0) {
+      db.prepare('INSERT INTO credits (id,user_id,amount_cents,type,reason,order_id,created_at) VALUES (?,?,?,?,?,?,?)')
+        .run(id('cr'), uid, bonus, 'bonus', `Top-up bonus (+${pct}%)`, null, now());
+    }
+    notify({ io, userId: uid, type: 'payment', title: 'Wallet topped up 🎉', body: `S$${(amount / 100).toFixed(2)} added${bonus > 0 ? ` + S$${(bonus / 100).toFixed(2)} bonus credit` : ''}.` });
+    res.json({ balance_cents: balanceOf(uid), added_cents: amount, bonus_cents: bonus });
   });
 
   // referrals
@@ -199,6 +429,14 @@ export function registerRoutes(app, io) {
         .run(id('sub'), uid, plan.id, 'active', now(), new Date(Date.now() + 30 * 864e5).toISOString());
     }
     notify({ io, userId: uid, type: 'subscription', title: `You're on ${plan.name}`, body: plan.id === 'plan_lite' ? 'Switched to pay-as-you-go.' : `Welcome to ChaseLaundry ${plan.name}.` });
+    res.json({ ok: true, subscription: activeSub(uid) });
+  });
+
+  // cancel active subscription
+  app.post('/api/customers/:id/subscription/cancel', (req, res) => {
+    const uid = req.params.id;
+    db.prepare(`UPDATE subscriptions SET status='cancelled' WHERE user_id=? AND status='active'`).run(uid);
+    notify({ io, userId: uid, type: 'subscription', title: 'Subscription cancelled', body: 'Your subscription has been cancelled.' });
     res.json({ ok: true, subscription: activeSub(uid) });
   });
 
@@ -366,12 +604,25 @@ export function registerRoutes(app, io) {
 
   app.get('/api/ops/drivers', (_req, res) => {
     const drivers = db.prepare(`SELECT * FROM users WHERE role='driver' ORDER BY name`).all();
-    res.json(drivers.map((d) => ({
+    res.json(drivers.map((d) => { delete d.password_hash; return {
       ...d,
       shift: db.prepare(`SELECT * FROM shifts WHERE driver_id=? AND status='active' LIMIT 1`).get(d.id) || null,
       active_jobs: db.prepare(`SELECT COUNT(*) c FROM orders WHERE driver_id=? AND status NOT IN ('completed','cancelled')`).get(d.id).c,
       location: db.prepare('SELECT * FROM driver_locations WHERE driver_id=? ORDER BY ts DESC LIMIT 1').get(d.id) || null,
-    })));
+    }; }));
+  });
+
+  // HQ adds a new driver to the fleet
+  app.post('/api/ops/drivers', (req, res) => {
+    const name = String(req.body.name || '').trim();
+    if (!name) return res.status(400).json({ error: 'Driver name is required.' });
+    const avatar = name.split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
+    const uid = id('drv');
+    db.prepare('INSERT INTO users (id,role,name,email,phone,avatar,facility_id,created_at) VALUES (?,?,?,?,?,?,?,?)')
+      .run(uid, 'driver', name, String(req.body.email || '').trim() || null, String(req.body.phone || '').trim() || null, avatar, null, now());
+    const driver = getUser(uid);
+    io.to('role:ops').emit('driver:shift', { driver_id: uid }); // nudge ops lists to refresh
+    res.json(driver);
   });
 
   app.post('/api/orders/:id/assign', (req, res) => {
@@ -460,6 +711,30 @@ export function registerRoutes(app, io) {
     broadcastOrder(io, o.id);
     io.to(`order:${o.id}`).emit('garment:updated', { ...g, events: garmentEvents(g.id) });
     res.json(g);
+  });
+
+  // generate a printable tag per item (used by HQ/driver to print & scan)
+  app.post('/api/orders/:id/generate-tags', (req, res) => {
+    const o = db.prepare('SELECT * FROM orders WHERE id = ?').get(req.params.id);
+    if (!o) return res.status(404).json({ error: 'not found' });
+    const existing = db.prepare('SELECT COUNT(*) c FROM garments WHERE order_id = ?').get(o.id).c;
+    if (existing === 0) {
+      const items = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(o.id);
+      let n = 0;
+      for (const it of items) {
+        const qty = it.weight_kg ? 1 : (it.qty || 1); // weight items get 1 bag tag
+        for (let k = 0; k < qty; k++) {
+          n += 1;
+          const gid = id('grm');
+          const tag = `${o.code}-${String(n).padStart(2, '0')}`;
+          db.prepare('INSERT INTO garments (id,order_id,tag_code,type,color,weight_kg,care,status,notes,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
+            .run(gid, o.id, tag, it.name, null, it.weight_kg || null, null, 'checked_in', '', now());
+          logGarmentEvent(gid, 'checked_in', req.body.actor || 'ops', 'Tag printed');
+        }
+      }
+      broadcastOrder(io, o.id);
+    }
+    res.json(db.prepare('SELECT * FROM garments WHERE order_id = ? ORDER BY tag_code').all(o.id));
   });
 
   // single garment with its full journey
@@ -663,20 +938,63 @@ export function registerRoutes(app, io) {
     io.to('role:ops').emit('driver:location', { ...next, driver_id: o.driver_id, order_id: o.id });
     res.json({ location: next, eta_km: km });
   });
+
+  // spin up a demo order already out-for-delivery with a driver ~3km away,
+  // so customer/web/ops can immediately watch live tracking
+  app.post('/api/demo/customers/:id/spawn-tracking', (req, res) => {
+    const uid = req.params.id;
+    if (!getUser(uid)) return res.status(404).json({ error: 'no such customer' });
+    let addr = db.prepare('SELECT * FROM addresses WHERE user_id = ? ORDER BY is_default DESC LIMIT 1').get(uid);
+    if (!addr) {
+      const aid = id('adr');
+      db.prepare('INSERT INTO addresses (id,user_id,label,type,line1,line2,city,postcode,lat,lng,is_default) VALUES (?,?,?,?,?,?,?,?,?,?,1)')
+        .run(aid, uid, 'Home', 'home', '78 Tiong Bahru Road', '#12-04', 'Singapore', '168732', 1.2847, 103.8270);
+      addr = db.prepare('SELECT * FROM addresses WHERE id = ?').get(aid);
+    }
+    const driver = db.prepare("SELECT * FROM users WHERE role = 'driver' ORDER BY name LIMIT 1").get();
+    const fac = db.prepare('SELECT * FROM facilities WHERE active = 1 LIMIT 1').get();
+    const cat = db.prepare('SELECT * FROM catalog LIMIT 1').get();
+    const oid = id('ord');
+    const code = `CL-${1000 + db.prepare('SELECT COUNT(*) c FROM orders').get().c + 50}`;
+    db.prepare(`INSERT INTO orders (id,code,customer_id,address_id,driver_id,facility_id,status,pickup_slot,return_slot,notes,handover,handover_contact,
+        subtotal_cents,platform_fee_cents,delivery_fee_cents,discount_cents,credit_applied_cents,total_cents,payment_status,created_at,updated_at)
+      VALUES (?,?,?,?,?,?, 'out_for_delivery', ?,?,?,?,?, ?,?,?,?,?,?, 'paid', ?, ?)`)
+      .run(oid, code, uid, addr.id, driver?.id ?? null, fac?.id ?? null, 'Today · 18:00–20:00', 'Today · 20:00–22:00', 'Demo live-tracking order', 'leave_at_door', null,
+        1400, 99, 0, 0, 0, 1499, now(), now());
+    db.prepare('INSERT INTO order_items (id,order_id,catalog_id,name,qty,weight_kg,price_cents) VALUES (?,?,?,?,?,?,?)')
+      .run(id('itm'), oid, cat?.id ?? null, cat?.name || 'Wash & Fold', 1, 4, 1400);
+    if (driver) {
+      const start = { lat: addr.lat + 0.025, lng: addr.lng + 0.02 }; // ~3km away
+      db.prepare('INSERT INTO driver_locations (id,driver_id,order_id,lat,lng,ts) VALUES (?,?,?,?,?,?)')
+        .run(id('loc'), driver.id, oid, start.lat, start.lng, now());
+    }
+    const full = fullOrder(oid);
+    io.to('role:ops').emit('order:new', full);
+    res.json(full);
+  });
 }
 
 // ---- pricing engine ----
 function lineTotal(cat, it) {
+  // explicit per-unit price override (e.g. B2B contract pricing set at runtime)
+  if (it.unit_cents != null && it.unit_cents !== '') {
+    const per = Number(it.unit_cents) || 0;
+    return it.weight_kg ? Math.round(per * it.weight_kg) : per * (it.qty || 1);
+  }
   if (!cat) return it.price_cents || 0;
   if (cat.unit === 'per_kg') return Math.round(cat.price_cents * (it.weight_kg || 0));
   return cat.price_cents * (it.qty || 1);
 }
 
-function priceOrder({ customer_id, items = [], use_credit = false }) {
+function priceOrder({ customer_id, items = [], use_credit = false, b2b = false }) {
   let subtotal = 0;
   for (const it of items) {
     const cat = db.prepare('SELECT * FROM catalog WHERE id = ?').get(it.catalog_id);
     subtotal += lineTotal(cat, it);
+  }
+  // B2B = contract billing: items only, no consumer platform fee / delivery / plan discount / wallet
+  if (b2b) {
+    return { subtotal_cents: subtotal, platform_fee_cents: 0, delivery_fee_cents: 0, discount_cents: 0, credit_applied_cents: 0, total_cents: subtotal, plan: 'B2B' };
   }
   const sub = customer_id ? activeSub(customer_id) : null;
   const discount = sub ? Math.round((subtotal * sub.discount_pct) / 100) : 0;

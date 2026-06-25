@@ -1,10 +1,11 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
-  api, fmt, getSocket, useSocket, STATUS_FLOW, STATUS_LABEL, GARMENT_LABEL,
-  StatusPill, OneMap, GarmentJourney, Avatar, Empty,
+  api, fmt, getSocket, useSocket, STATUS_FLOW, STATUS_LABEL, GARMENT_LABEL, HANDOVER, TICKET_CATEGORIES,
+  StatusPill, OneMap, GarmentJourney, Avatar, Empty, PaymentSheet, TopUpSheet, topupBonus, distKm, etaMins, printInvoice,
 } from '@shared';
+import { customerId, logout } from '../auth.js';
 
-const CUSTOMER_ID = 'cus_1';
+const CUSTOMER_ID = customerId();
 
 export default function Account({ initialTab = 'orders' }) {
   const [tab, setTab] = useState(initialTab);
@@ -24,6 +25,7 @@ export default function Account({ initialTab = 'orders' }) {
               <span className="cl-muted">{summary?.subscription?.plan_name || 'Lite'} plan · wallet {fmt.money(summary?.balance_cents || 0)}</span>
             </div>
           </div>
+          <button className="cl-btn cl-btn-ghost cl-btn-sm" style={{ width: 'auto' }} onClick={logout}>Log out</button>
         </div>
         <div className="tabs">
           {tabs.map(([k, l]) => <button key={k} className={tab === k ? 'active' : ''} onClick={() => setTab(k)}>{l}</button>)}
@@ -49,6 +51,8 @@ function Orders() {
     <div className="two-col">
       <div>{sel ? <OrderDetail orderId={sel} /> : <div className="panel"><Empty icon="📦" title="No orders yet" /></div>}</div>
       <div>
+        <button className="cl-btn cl-btn-ghost cl-btn-sm" style={{ marginBottom: 12, width: 'auto', border: '1.5px dashed var(--navy)' }}
+          onClick={async () => { const o = await api.post(`/api/demo/customers/${CUSTOMER_ID}/spawn-tracking`); load(); setSel(o.id); }}>🚗 Demo: track a live driver</button>
         <div className="cl-eyebrow" style={{ marginBottom: 10 }}>Your orders</div>
         {orders.map((o) => (
           <div key={o.id} className="panel" onClick={() => setSel(o.id)} style={{ marginBottom: 10, cursor: 'pointer', padding: 16, border: sel === o.id ? '2px solid var(--navy)' : '2px solid transparent' }}>
@@ -64,6 +68,8 @@ function Orders() {
 function OrderDetail({ orderId }) {
   const [o, setO] = useState(null);
   const [driverLoc, setDriverLoc] = useState(null);
+  const [autoDrive, setAutoDrive] = useState(true);
+  const [payOpen, setPayOpen] = useState(false);
   const reload = useCallback(() => api.get(`/api/orders/${orderId}`).then((x) => { setO(x); setDriverLoc(x.location); }), [orderId]);
   useEffect(() => { reload(); }, [reload]);
   useSocket({
@@ -73,9 +79,20 @@ function OrderDetail({ orderId }) {
   }, { userId: CUSTOMER_ID }, [orderId]);
   useEffect(() => { getSocket().emit('watch:order', orderId); return () => getSocket().emit('unwatch:order', orderId); }, [orderId]);
 
+  // live tracking: auto-advance driver toward the address while en route
+  const enRoute = o && ['driver_en_route', 'out_for_delivery'].includes(o.status) && o.address;
+  useEffect(() => {
+    if (!enRoute || !autoDrive) return;
+    const t = setInterval(() => { api.post(`/api/demo/orders/${orderId}/simulate-drive`, {}).catch(() => {}); }, 2500);
+    return () => clearInterval(t);
+  }, [enRoute, autoDrive, orderId]);
+
   if (!o) return <div className="panel">Loading…</div>;
-  const showMap = ['driver_en_route', 'out_for_delivery'].includes(o.status) && o.address;
+  const showMap = enRoute;
   const idx = STATUS_FLOW.indexOf(o.status);
+  const driver = driverLoc || o.location;
+  const km = driver?.lat && o.address?.lat ? distKm(driver, o.address) : null;
+  const eta = etaMins(km);
 
   return (
     <div className="panel">
@@ -85,8 +102,24 @@ function OrderDetail({ orderId }) {
       </div>
 
       {showMap && <div style={{ marginBottom: 18 }}>
-        <OneMap driver={driverLoc} dest={o.address} height={220} />
-        <div className="cl-muted" style={{ fontSize: 13, marginTop: 8 }}>{o.driver?.name} is on the way to {o.address?.postcode}.</div>
+        <OneMap driver={driver} dest={o.address} height={220} />
+        <div className="cl-between" style={{ marginTop: 10 }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 14 }}>
+            <span style={{ width: 9, height: 9, borderRadius: 9, background: 'var(--ok)', animation: 'clLive 1.6s infinite' }} />
+            <b>{o.driver?.name?.split(' ')[0] || 'Driver'}</b>
+            <span className="cl-muted">{km != null ? `· ${km.toFixed(1)} km away` : '· on the way'}</span>
+          </span>
+          {eta != null && <span style={{ fontWeight: 900, fontSize: 15 }}>~{eta} min away</span>}
+        </div>
+        <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+          <button className="cl-btn cl-btn-ghost cl-btn-sm" style={{ width: 'auto' }} onClick={() => setAutoDrive((a) => !a)}>{autoDrive ? '⏸ Pause live' : '▶ Resume live'}</button>
+          <button className="cl-btn cl-btn-ghost cl-btn-sm" style={{ width: 'auto' }} onClick={() => api.post(`/api/demo/orders/${orderId}/simulate-drive`, {})}>Advance ›</button>
+        </div>
+        <style>{`@keyframes clLive{0%{box-shadow:0 0 0 0 rgba(22,163,74,.5)}70%{box-shadow:0 0 0 8px rgba(22,163,74,0)}100%{box-shadow:0 0 0 0 rgba(22,163,74,0)}}`}</style>
+      </div>}
+
+      {o.handover && HANDOVER[o.handover] && <div className="cl-between" style={{ marginBottom: 14, padding: '12px 14px', borderRadius: 12, background: 'var(--light)' }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}><span style={{ fontSize: 20 }}>{HANDOVER[o.handover].icon}</span><span><b>{HANDOVER[o.handover].label}</b>{o.handover_contact && <div className="cl-muted" style={{ fontSize: 13 }}>{o.handover_contact}</div>}</span></span>
       </div>}
 
       {o.transfer
@@ -132,8 +165,15 @@ function OrderDetail({ orderId }) {
       {o.credit_applied_cents > 0 && <div className="cl-between" style={{ fontSize: 14 }}><span className="cl-muted">Wallet credit</span><span style={{ color: 'var(--ok)' }}>– {fmt.money(o.credit_applied_cents)}</span></div>}
       <div className="cl-between" style={{ marginTop: 6 }}><b>Total</b><b>{fmt.money(o.total_cents)}</b></div>
 
-      {o.payment_status !== 'paid' && o.status !== 'cancelled' &&
-        <button className="cl-btn cl-btn-lime" style={{ marginTop: 18 }} onClick={async () => { await api.post(`/api/orders/${o.id}/pay`); reload(); }}>Pay {fmt.money(o.total_cents)}</button>}
+      <div style={{ display: 'flex', gap: 10, marginTop: 18, flexWrap: 'wrap' }}>
+        {o.payment_status !== 'paid' && o.status !== 'cancelled' &&
+          <button className="cl-btn cl-btn-lime" style={{ width: 'auto' }} onClick={() => setPayOpen(true)}>Pay {fmt.money(o.total_cents)}</button>}
+        <button className="cl-btn cl-btn-ghost" style={{ width: 'auto' }} onClick={() => printInvoice(o)}>🧾 Download invoice</button>
+      </div>
+
+      <PaymentSheet open={payOpen} onClose={() => setPayOpen(false)} amountCents={o.total_cents}
+        title="Complete payment" description={o.code}
+        onAuthorized={async () => { await api.post(`/api/orders/${o.id}/pay`); reload(); }} />
     </div>
   );
 }
@@ -143,11 +183,13 @@ function Wallet({ onReload }) {
   const [data, setData] = useState(null);
   const [ref, setRef] = useState(null);
   const [email, setEmail] = useState('');
+  const [topupOpen, setTopupOpen] = useState(false);
+  const [payAmount, setPayAmount] = useState(0);
   const reload = () => { api.get(`/api/customers/${CUSTOMER_ID}/credits`).then(setData); api.get(`/api/customers/${CUSTOMER_ID}/referrals`).then(setRef); };
   useEffect(() => { reload(); }, []);
   const invite = async () => { await api.post(`/api/customers/${CUSTOMER_ID}/referrals`, { email }); setEmail(''); reload(); };
   if (!data) return <div className="panel">Loading…</div>;
-  const icon = { referral: '🎁', in_store: '💚', signup: '👋', refund: '↩️', spend: '🧾', adjustment: '⚙️' };
+  const icon = { referral: '🎁', in_store: '💚', signup: '👋', refund: '↩️', spend: '🧾', adjustment: '⚙️', topup: '➕', bonus: '🎁' };
   return (
     <div className="two-col">
       <div className="panel">
@@ -163,8 +205,15 @@ function Wallet({ onReload }) {
         <div className="panel" style={{ background: 'var(--navy)', color: '#fff', textAlign: 'center', marginBottom: 16 }}>
           <div className="cl-eyebrow" style={{ color: 'rgba(255,255,255,.4)' }}>Wallet balance</div>
           <div style={{ fontSize: 40, fontWeight: 900, margin: '8px 0' }}>{fmt.money(data.balance_cents)}</div>
-          <div style={{ fontSize: 12, color: 'var(--lime)' }}>Applied automatically at checkout</div>
+          <div style={{ fontSize: 12, color: 'var(--lime)', marginBottom: 14 }}>Applied automatically at checkout</div>
+          <button className="cl-btn cl-btn-lime" onClick={() => setTopupOpen(true)}>+ Top up credit</button>
         </div>
+
+        <TopUpSheet open={topupOpen} onClose={() => setTopupOpen(false)} onContinue={(amt) => { setTopupOpen(false); setPayAmount(amt); }} />
+        <PaymentSheet open={payAmount > 0} onClose={() => setPayAmount(0)} amountCents={payAmount} cta="Top up"
+          title="Top up wallet" description={`+ ${fmt.money(payAmount + topupBonus(payAmount).bonus)} credit`}
+          onAuthorized={async () => { await api.post(`/api/customers/${CUSTOMER_ID}/topup`, { amount_cents: payAmount }); reload(); onReload?.(); }} />
+
         <div className="panel">
           <b>Refer a friend 🎁</b>
           <p className="cl-muted" style={{ fontSize: 13, margin: '6px 0 12px' }}>You both get {fmt.money(ref?.reward_cents || 500)}.</p>
@@ -207,20 +256,65 @@ function Subscription({ summary, onReload }) {
 function Support() {
   const [threads, setThreads] = useState([]);
   const [active, setActive] = useState(null);
+  const [creating, setCreating] = useState(false);
   const load = () => api.get(`/api/customers/${CUSTOMER_ID}/threads`).then((t) => { setThreads(t); setActive((a) => a || t[0]?.id); });
   useEffect(() => { load(); }, []);
+  const onCreated = (t) => { setCreating(false); load(); setActive(t.id); };
   return (
     <div className="two-col">
-      <div>{active ? <Chat threadId={active} /> : <div className="panel"><Empty icon="💬" title="No conversations" /></div>}</div>
+      <div>{creating ? <NewTicket onCreated={onCreated} onCancel={() => setCreating(false)} />
+        : active ? <Chat threadId={active} /> : <div className="panel"><Empty icon="💬" title="No conversations" /></div>}</div>
       <div>
-        <button className="cl-btn cl-btn-lime cl-btn-sm" style={{ marginBottom: 12 }} onClick={async () => { const t = await api.post(`/api/customers/${CUSTOMER_ID}/threads`, { subject: 'New conversation' }); load(); setActive(t.id); }}>+ New chat</button>
+        <button className="cl-btn cl-btn-lime cl-btn-sm" style={{ marginBottom: 12 }} onClick={() => setCreating(true)}>+ New ticket</button>
         {threads.map((t) => (
-          <div key={t.id} className="panel" onClick={() => setActive(t.id)} style={{ marginBottom: 10, padding: 14, cursor: 'pointer', border: active === t.id ? '2px solid var(--navy)' : '2px solid transparent' }}>
+          <div key={t.id} className="panel" onClick={() => { setCreating(false); setActive(t.id); }} style={{ marginBottom: 10, padding: 14, cursor: 'pointer', border: active === t.id && !creating ? '2px solid var(--navy)' : '2px solid transparent' }}>
             <div className="cl-between"><b style={{ fontSize: 14 }}>{t.subject}</b><span className={`cl-chip ${t.status === 'open' ? '' : 'cl-chip-gray'}`}>{t.status}</span></div>
             <div className="cl-muted" style={{ fontSize: 12, marginTop: 4 }}>Updated {fmt.ago(t.updated_at)}</div>
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function NewTicket({ onCreated, onCancel }) {
+  const [cat, setCat] = useState('order');
+  const [subject, setSubject] = useState('');
+  const [message, setMessage] = useState('');
+  const [orderId, setOrderId] = useState('');
+  const [orders, setOrders] = useState([]);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { api.get(`/api/customers/${CUSTOMER_ID}/orders`).then(setOrders); }, []);
+  const submit = async () => {
+    setBusy(true);
+    const c = TICKET_CATEGORIES.find((x) => x.key === cat);
+    const ord = orders.find((o) => o.id === orderId);
+    const t = await api.post(`/api/customers/${CUSTOMER_ID}/threads`, {
+      subject: `${c.icon} ${c.label}${ord ? ` · ${ord.code}` : ''}${subject.trim() ? ` · ${subject.trim()}` : ''}`,
+      order_id: orderId || undefined,
+      body: message.trim() || undefined,
+    });
+    setBusy(false); onCreated(t);
+  };
+  return (
+    <div className="panel">
+      <div className="cl-between" style={{ marginBottom: 16 }}><h2 style={{ fontWeight: 900 }}>Raise a support ticket</h2><button onClick={onCancel} style={{ color: 'var(--gray)', fontWeight: 600 }}>Cancel</button></div>
+      <div className="cl-eyebrow" style={{ marginBottom: 8 }}>What's it about?</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 16 }}>
+        {TICKET_CATEGORIES.map((c) => (
+          <button key={c.key} onClick={() => setCat(c.key)} style={{ textAlign: 'left', padding: '12px 14px', borderRadius: 12, fontWeight: 700, fontSize: 14, border: cat === c.key ? '2px solid var(--navy)' : '1.5px solid var(--gray3)', background: cat === c.key ? 'var(--navy)' : '#fff', color: cat === c.key ? '#fff' : 'var(--gray)' }}>{c.icon} {c.label}</button>
+        ))}
+      </div>
+      <label className="cl-label">Related order (optional)</label>
+      <select className="cl-field" style={{ width: '100%', marginBottom: 14 }} value={orderId} onChange={(e) => setOrderId(e.target.value)}>
+        <option value="">— None —</option>
+        {orders.map((o) => <option key={o.id} value={o.id}>{o.code} · {o.status_label} · {fmt.money(o.total_cents)}</option>)}
+      </select>
+      <label className="cl-label">Subject (optional)</label>
+      <input className="cl-field" style={{ width: '100%', marginBottom: 14 }} placeholder="Short summary…" value={subject} onChange={(e) => setSubject(e.target.value)} />
+      <label className="cl-label">How can we help?</label>
+      <textarea className="cl-field" rows={5} style={{ width: '100%', marginBottom: 16, resize: 'vertical' }} placeholder="Tell us what happened…" value={message} onChange={(e) => setMessage(e.target.value)} />
+      <button className="cl-btn cl-btn-lime" disabled={busy || !message.trim()} onClick={submit}>{busy ? 'Creating…' : 'Submit ticket'}</button>
     </div>
   );
 }

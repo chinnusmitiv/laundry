@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api, fmt, PlacesAutocomplete } from '@shared';
+import { api, fmt, PlacesAutocomplete, HANDOVER, ADDRESS_TYPES } from '@shared';
+import { customerId } from '../auth.js';
 
-const CUSTOMER_ID = 'cus_1';
+const CUSTOMER_ID = customerId();
 
 export default function Order() {
   const nav = useNavigate();
@@ -19,6 +20,8 @@ export default function Order() {
   const [addrId, setAddrId] = useState(null);
   const [adding, setAdding] = useState(false);
   const [notes, setNotes] = useState('');
+  const [handover, setHandover] = useState('hand_to_me');
+  const [handoverContact, setHandoverContact] = useState('');
 
   useEffect(() => {
     api.get('/api/catalog').then(setCatalog);
@@ -28,11 +31,16 @@ export default function Order() {
     });
   }, []);
 
-  const addPlace = async (p) => {
+  const [pendingPlace, setPendingPlace] = useState(null);
+  const [addrType, setAddrType] = useState('home');
+  const [addrLabel, setAddrLabel] = useState('');
+
+  const saveAddress = async () => {
     const a = await api.post(`/api/customers/${CUSTOMER_ID}/addresses`, {
-      label: p.name, line1: p.line1, line2: '', city: 'Singapore', postcode: p.postcode, lat: p.lat, lng: p.lng, make_default: true,
+      type: addrType, label: (addrLabel.trim() || ADDRESS_TYPES[addrType].label),
+      line1: pendingPlace.line1, line2: '', city: 'Singapore', postcode: pendingPlace.postcode, lat: pendingPlace.lat, lng: pendingPlace.lng, make_default: true,
     });
-    setAddresses((list) => [...list, a]); setAddrId(a.id); setAdding(false);
+    setAddresses((list) => [...list, a]); setAddrId(a.id); setAdding(false); setPendingPlace(null); setAddrType('home'); setAddrLabel('');
   };
 
   const items = Object.entries(cart).filter(([, v]) => (v.qty || v.weight) > 0)
@@ -46,7 +54,7 @@ export default function Order() {
   const setItem = (id, patch) => setCart((c) => ({ ...c, [id]: { ...c[id], ...patch } }));
   const place = async () => {
     setPlacing(true);
-    const o = await api.post('/api/orders', { customer_id: CUSTOMER_ID, address_id: addrId, items, pickup_slot: slot, return_slot: 'Thu · 18:00–20:00', use_credit: useCredit, notes });
+    const o = await api.post('/api/orders', { customer_id: CUSTOMER_ID, address_id: addrId, items, pickup_slot: slot, return_slot: 'Thu · 18:00–20:00', use_credit: useCredit, notes, handover, handover_contact: handover === 'someone_else' ? handoverContact : null });
     setPlacing(false); setPlaced(o); setStep(4);
   };
 
@@ -91,15 +99,45 @@ export default function Order() {
                 <h3 style={{ fontWeight: 800 }}>Pickup address</h3>
                 <button className="cl-btn cl-btn-ghost cl-btn-sm" onClick={() => setAdding((x) => !x)}>{adding ? 'Cancel' : '+ Add address'}</button>
               </div>
-              {adding && <div style={{ marginBottom: 12 }}>
-                <PlacesAutocomplete autoFocus onSelect={addPlace} placeholder="e.g. Tiong Bahru, 168732, ION Orchard…" />
+              {adding && <div style={{ marginBottom: 12, padding: 16, borderRadius: 12, background: 'var(--light)' }}>
+                {!pendingPlace ? (
+                  <PlacesAutocomplete autoFocus onSelect={setPendingPlace} placeholder="e.g. Tiong Bahru, 168732, ION Orchard…" />
+                ) : <>
+                  <div className="cl-between" style={{ marginBottom: 12 }}>
+                    <div><b>📍 {pendingPlace.name}</b><div className="cl-muted" style={{ fontSize: 14 }}>{pendingPlace.line1} · {pendingPlace.postcode}</div></div>
+                    <button onClick={() => setPendingPlace(null)} style={{ fontWeight: 700, color: 'var(--navy)' }}>Change</button>
+                  </div>
+                  <div className="cl-label">Address type</div>
+                  <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                    {Object.entries(ADDRESS_TYPES).map(([k, t]) => (
+                      <button key={k} onClick={() => setAddrType(k)} style={{ flex: 1, padding: '10px 0', borderRadius: 11, fontWeight: 700, fontSize: 14, border: addrType === k ? '2px solid var(--navy)' : '1.5px solid var(--gray3)', background: addrType === k ? 'var(--navy)' : '#fff', color: addrType === k ? '#fff' : 'var(--gray)' }}>{t.icon} {t.label}</button>
+                    ))}
+                  </div>
+                  {addrType === 'other' && <input className="cl-field" placeholder="Label (e.g. Mum's place, Gym)" value={addrLabel} onChange={(e) => setAddrLabel(e.target.value)} style={{ width: '100%', marginBottom: 12 }} />}
+                  <button className="cl-btn cl-btn-lime" onClick={saveAddress}>Save address</button>
+                </>}
               </div>}
               {addresses.map((a) => (
                 <div key={a.id} onClick={() => setAddrId(a.id)} className="cl-between" style={{ padding: 16, borderRadius: 12, marginBottom: 10, cursor: 'pointer', border: addrId === a.id ? '2px solid var(--navy)' : '2px solid var(--gray3)' }}>
-                  <div><b>{a.label}</b><div className="cl-muted" style={{ fontSize: 14 }}>{a.line1}, {a.city} {a.postcode}</div></div>
+                  <div><b>{ADDRESS_TYPES[a.type]?.icon || '📍'} {a.label}</b><div className="cl-muted" style={{ fontSize: 14 }}>{a.line1}, {a.city} {a.postcode}</div></div>
                   {addrId === a.id && <span>✓</span>}
                 </div>
               ))}
+              <div style={{ margin: '22px 0 10px' }}>
+                <h3 style={{ fontWeight: 800 }}>How should we collect?</h3>
+              </div>
+              {Object.entries(HANDOVER).map(([key, h]) => (
+                <div key={key} onClick={() => setHandover(key)} className="cl-between" style={{ padding: 16, borderRadius: 12, marginBottom: 10, cursor: 'pointer', border: handover === key ? '2px solid var(--navy)' : '2px solid var(--gray3)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <span style={{ fontSize: 24 }}>{h.icon}</span>
+                    <div><b>{h.label}</b><div className="cl-muted" style={{ fontSize: 14 }}>{h.sub}</div></div>
+                  </div>
+                  {handover === key && <span>✓</span>}
+                </div>
+              ))}
+              {handover === 'someone_else' && (
+                <input className="cl-field" placeholder="Their name & phone (e.g. Mum · 9123 4567)" value={handoverContact} onChange={(e) => setHandoverContact(e.target.value)} style={{ width: '100%', marginBottom: 12 }} />
+              )}
               <div style={{ margin: '22px 0 10px' }}>
                 <h3 style={{ fontWeight: 800 }}>Special Instructions / Garment Notes</h3>
               </div>

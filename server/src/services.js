@@ -10,6 +10,11 @@ const log = (svc, msg) => console.log(`  ⟶ [${svc}] ${msg}`);
 
 // --- Payments (Stripe-shaped) ---
 export const payments = {
+  createIntent({ amountCents, description }) {
+    const id = `pi_${nanoid(16)}`;
+    log('stripe', `PaymentIntent ${id} — S$${(amountCents / 100).toFixed(2)} (${description}) → requires_payment_method`);
+    return { id, client_secret: `${id}_secret_${nanoid(12)}`, amount: amountCents, status: 'requires_payment_method' };
+  },
   charge({ orderId, amountCents, customer }) {
     log('stripe', `charge S$${(amountCents / 100).toFixed(2)} for ${orderId} (${customer?.email}) → succeeded (test mode)`);
     return { id: `pi_${nanoid(16)}`, status: 'succeeded', amount: amountCents };

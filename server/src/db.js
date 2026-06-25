@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import fs from 'fs';
+import { hashPassword } from './crypto.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dbPath = path.join(__dirname, '..', 'data', 'chaselaundry.db');
@@ -228,7 +229,48 @@ export function initSchema() {
     cost_cents INTEGER NOT NULL,
     PRIMARY KEY (facility_id, catalog_id)
   );
+
+  -- key/value app settings (JSON), e.g. order routing config
+  CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
   `);
+
+  migrateAuth();
+  migrateOrders();
+}
+
+// Add pickup handover instructions to orders (idempotent).
+function migrateOrders() {
+  const cols = db.prepare('PRAGMA table_info(orders)').all().map((c) => c.name);
+  if (!cols.includes('handover')) db.exec('ALTER TABLE orders ADD COLUMN handover TEXT');           // hand_to_me | leave_at_door | someone_else
+  if (!cols.includes('handover_contact')) db.exec('ALTER TABLE orders ADD COLUMN handover_contact TEXT'); // name/phone when someone_else
+
+  const acols = db.prepare('PRAGMA table_info(addresses)').all().map((c) => c.name);
+  if (!acols.includes('type')) db.exec("ALTER TABLE addresses ADD COLUMN type TEXT DEFAULT 'home'"); // home | work | other
+}
+
+// Add password support to the users table (idempotent) and make sure existing
+// demo customers can sign in. Default password for any pre-existing customer is
+// "password" — handy for live demos with the seeded Alex Morgan account.
+function migrateAuth() {
+  const cols = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
+  if (!cols.includes('password_hash')) {
+    db.exec('ALTER TABLE users ADD COLUMN password_hash TEXT');
+  }
+  // extra profile fields (used mainly for B2B clients on invoices)
+  for (const col of ['address', 'contact_person', 'gst_no', 'payment_terms']) {
+    if (!cols.includes(col)) db.exec(`ALTER TABLE users ADD COLUMN ${col} TEXT`);
+  }
+
+  const orphans = db.prepare(
+    `SELECT id FROM users WHERE role = 'customer' AND (password_hash IS NULL OR password_hash = '')`
+  ).all();
+  if (orphans.length) {
+    const set = db.prepare('UPDATE users SET password_hash = ? WHERE id = ?');
+    for (const u of orphans) set.run(hashPassword('password'), u.id);
+  }
 }
 
 // canonical order status flow (drives both UIs + validation)

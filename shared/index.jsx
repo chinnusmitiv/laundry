@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { getSocket, fmt, api } from './api.js';
@@ -178,14 +179,29 @@ export function PlacesAutocomplete({ onSelect, placeholder = 'Search address or 
   const [open, setOpen] = useState(false);
   const [hi, setHi] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [rect, setRect] = useState(null);
   const box = useRef(null);
+  const menu = useRef(null);
   const timer = useRef(null);
 
   useEffect(() => {
-    const onDoc = (e) => { if (box.current && !box.current.contains(e.target)) setOpen(false); };
+    const onDoc = (e) => {
+      if (box.current?.contains(e.target) || menu.current?.contains(e.target)) return;
+      setOpen(false);
+    };
     document.addEventListener('mousedown', onDoc);
     return () => document.removeEventListener('mousedown', onDoc);
   }, []);
+
+  // keep the (portaled) dropdown aligned to the input on open / scroll / resize
+  useEffect(() => {
+    if (!open) return;
+    const update = () => { if (box.current) setRect(box.current.getBoundingClientRect()); };
+    update();
+    window.addEventListener('scroll', update, true);
+    window.addEventListener('resize', update);
+    return () => { window.removeEventListener('scroll', update, true); window.removeEventListener('resize', update); };
+  }, [open, results.length, loading]);
 
   const onChange = (val) => {
     setQ(val); setOpen(true); setHi(0);
@@ -214,8 +230,8 @@ export function PlacesAutocomplete({ onSelect, placeholder = 'Search address or 
         <input className="cl-field" style={{ paddingLeft: 40 }} value={q} placeholder={placeholder} autoFocus={autoFocus}
           onChange={(e) => onChange(e.target.value)} onFocus={() => q && setOpen(true)} onKeyDown={onKey} />
       </div>
-      {open && (q.trim().length >= 2) && (
-        <div style={{ position: 'absolute', top: 'calc(100% + 6px)', left: 0, right: 0, background: '#fff', borderRadius: 12, boxShadow: '0 12px 40px rgba(29,41,81,.18)', zIndex: 80, overflow: 'hidden', border: '1px solid var(--gray3)' }}>
+      {open && (q.trim().length >= 2) && rect && createPortal(
+        <div ref={menu} style={{ position: 'fixed', top: rect.bottom + 6, left: rect.left, width: rect.width, background: '#fff', borderRadius: 12, boxShadow: '0 12px 40px rgba(29,41,81,.18)', zIndex: 100000, overflow: 'hidden', border: '1px solid var(--gray3)' }}>
           {loading && results.length === 0 && <div style={{ padding: 14, fontSize: 13, color: 'var(--gray)' }}>Searching…</div>}
           {!loading && results.length === 0 && <div style={{ padding: 14, fontSize: 13, color: 'var(--gray)' }}>No places found</div>}
           {results.map((p, i) => (
@@ -229,8 +245,7 @@ export function PlacesAutocomplete({ onSelect, placeholder = 'Search address or 
             </div>
           ))}
           <div style={{ padding: '6px 14px', fontSize: 10, color: 'var(--gray2)', borderTop: '1px solid var(--gray3)', textAlign: 'right' }}>Powered by ChaseLaundry Places 🇸🇬</div>
-        </div>
-      )}
+        </div>, document.body)}
     </div>
   );
 }
@@ -300,6 +315,50 @@ export function OneMap({ driver, dest, height = 220 }) {
   return <div ref={el} style={{ height, borderRadius: 16, overflow: 'hidden', position: 'relative', isolation: 'isolate', background: '#dde3f0' }} />;
 }
 
+// fleet map — plots many drivers live on OneMap tiles (HQ tracking)
+function driverLabelIcon(name) {
+  return L.divIcon({
+    className: 'cl-leaflet-icon',
+    html: `<div style="display:flex;align-items:center;gap:6px;transform:translate(-50%,-50%)"><div class="cl-pulse"></div><span style="background:#1D2951;color:#fff;font-size:11px;font-weight:700;padding:2px 7px;border-radius:8px;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,.2)">${name || 'Driver'}</span></div>`,
+    iconSize: [0, 0],
+  });
+}
+
+export function FleetMap({ drivers = [], height = 420 }) {
+  const el = useRef(null);
+  const map = useRef(null);
+  const marks = useRef({});
+
+  useEffect(() => {
+    if (!el.current || map.current) return;
+    const m = L.map(el.current, { zoomControl: true, attributionControl: true }).setView([1.3521, 103.8198], 12);
+    L.tileLayer('https://www.onemap.gov.sg/maps/tiles/Default/{z}/{x}/{y}.png', {
+      detectRetina: true, maxZoom: 18, minZoom: 11,
+      attribution: '&copy; <a href="https://www.onemap.gov.sg/">OneMap</a> &copy; Singapore Land Authority',
+    }).addTo(m);
+    map.current = m;
+    setTimeout(() => m.invalidateSize(), 150);
+    return () => { m.remove(); map.current = null; marks.current = {}; };
+  }, []);
+
+  useEffect(() => {
+    const m = map.current; if (!m) return;
+    const pts = [], seen = new Set();
+    for (const d of drivers) {
+      if (d.lat == null) continue;
+      seen.add(d.id); const ll = [d.lat, d.lng]; pts.push(ll);
+      if (!marks.current[d.id]) marks.current[d.id] = L.marker(ll, { icon: driverLabelIcon(d.name) }).addTo(m);
+      else marks.current[d.id].setLatLng(ll);
+    }
+    for (const k of Object.keys(marks.current)) { if (!seen.has(k)) { m.removeLayer(marks.current[k]); delete marks.current[k]; } }
+    m.invalidateSize();
+    if (pts.length === 1) m.setView(pts[0], 14, { animate: true });
+    else if (pts.length > 1) m.fitBounds(pts, { padding: [50, 50], maxZoom: 15 });
+  }, [JSON.stringify(drivers.map((d) => [d.id, d.lat, d.lng]))]);
+
+  return <div ref={el} style={{ height, borderRadius: 16, overflow: 'hidden', position: 'relative', isolation: 'isolate', background: '#dde3f0' }} />;
+}
+
 // simple mini map (no external tiles) — plots driver + destination on a stylised grid
 export function MiniMap({ driver, dest, height = 200 }) {
   // normalise lat/lng into the box
@@ -322,5 +381,183 @@ export function MiniMap({ driver, dest, height = 200 }) {
       </svg>
       <div style={{ position: 'absolute', bottom: 10, left: 12, fontSize: 10, fontWeight: 700, color: 'rgba(199,255,51,.6)', letterSpacing: '1px' }}>● LIVE TRACKING</div>
     </div>
+  );
+}
+
+// haversine distance in km between two {lat,lng} points (shared by customer + web tracking)
+export function distKm(a, b) {
+  if (!a?.lat || !b?.lat) return null;
+  const R = 6371, rad = (d) => (d * Math.PI) / 180;
+  const dLat = rad(b.lat - a.lat), dLng = rad(b.lng - a.lng);
+  const s = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
+}
+export const etaMins = (km) => (km == null ? null : Math.max(1, Math.round(km * 3)));
+
+// ── Stripe-style payment sheet with simulated 3D Secure (shared by customer + web) ──
+const TEST_CARDS = [
+  { label: '3D Secure', num: '4000 0025 0000 3155' },
+  { label: 'Instant', num: '4242 4242 4242 4242' },
+  { label: 'Declined', num: '4000 0000 0000 9995' },
+];
+const groupCard = (v) => v.replace(/\D/g, '').slice(0, 16).replace(/(.{4})/g, '$1 ').trim();
+function PayLine({ l, v, green }) {
+  return <div className="cl-between" style={{ padding: '4px 0', fontSize: 14 }}><span className="cl-muted">{l}</span><span style={{ color: green ? 'var(--ok)' : 'inherit', fontWeight: green ? 700 : 500 }}>{v}</span></div>;
+}
+function PayErr({ children }) {
+  return <div style={{ background: 'rgba(239,68,68,.1)', color: 'var(--danger)', fontSize: 13, fontWeight: 600, padding: '10px 12px', borderRadius: 10, marginBottom: 12 }}>{children}</div>;
+}
+
+export function PaymentSheet({ open, onClose, amountCents, title, description, cta = 'Pay', recurring = false, onAuthorized }) {
+  const [phase, setPhase] = useState('card'); // card | 3ds | success
+  const [card, setCard] = useState('4000 0025 0000 3155');
+  const [exp, setExp] = useState('12 / 34');
+  const [cvc, setCvc] = useState('123');
+  const [auth, setAuth] = useState(null);
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  useEffect(() => {
+    if (open) { setPhase('card'); setCard('4000 0025 0000 3155'); setExp('12 / 34'); setCvc('123'); setAuth(null); setCode(''); setErr(''); setBusy(false); }
+  }, [open]);
+
+  const finish = async () => {
+    setBusy(true); setErr('');
+    try { await onAuthorized?.(); setPhase('success'); setTimeout(() => onClose?.(), 1300); }
+    catch (e) { setErr(e.message || 'Payment captured but activation failed.'); setBusy(false); }
+  };
+
+  const confirm = async (withCode) => {
+    setBusy(true); setErr('');
+    try {
+      const res = await api.post('/api/payments/confirm', { card, code: withCode ? code : undefined, amount_cents: amountCents, description });
+      if (res.status === 'requires_action') { setAuth(res.auth); setCode(res.auth?.demo_code || ''); setPhase('3ds'); setBusy(false); return; }
+      if (res.status === 'succeeded') return finish();
+      setErr('Payment could not be completed.'); setBusy(false);
+    } catch (e) { setErr(e.message || 'Payment failed.'); setBusy(false); }
+  };
+
+  return (
+    <Sheet open={open} onClose={busy ? undefined : onClose} title={phase === '3ds' ? null : title}>
+      {phase === 'success' ? (
+        <div style={{ textAlign: 'center', padding: '24px 0 12px' }}>
+          <div style={{ width: 64, height: 64, borderRadius: 64, background: 'var(--lime)', color: 'var(--navy)', fontSize: 34, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px' }}>✓</div>
+          <div style={{ fontWeight: 900, fontSize: 19 }}>Payment authenticated</div>
+          <div className="cl-muted" style={{ fontSize: 13, marginTop: 4 }}>{fmt.money(amountCents)}{recurring ? ' / mo' : ''} · {description}</div>
+        </div>
+      ) : phase === '3ds' ? (
+        <>
+          <div style={{ background: 'var(--navy)', color: '#fff', borderRadius: 14, padding: '16px 16px 18px', marginBottom: 16 }}>
+            <div className="cl-between" style={{ marginBottom: 12 }}>
+              <span style={{ fontWeight: 900, fontSize: 15 }}>🔒 {auth?.bank || 'Bank'} Secure</span>
+              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--lime)' }}>{auth?.brand} •••• {auth?.masked}</span>
+            </div>
+            <div style={{ fontSize: 13, color: 'rgba(255,255,255,.7)' }}>
+              For your security, enter the one-time code to authorise this {recurring ? 'subscription' : 'payment'} of <b style={{ color: '#fff' }}>{fmt.money(amountCents)}</b>.
+            </div>
+          </div>
+          <label style={{ display: 'block', marginBottom: 12 }}>
+            <span className="cl-label">Authentication code</span>
+            <input className="cl-field" inputMode="numeric" maxLength={6} placeholder="••••••"
+              value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
+              onKeyDown={(e) => e.key === 'Enter' && code.length === 6 && confirm(true)}
+              style={{ textAlign: 'center', fontSize: 24, fontWeight: 800, letterSpacing: '10px' }} />
+          </label>
+          {auth?.demo_code && (
+            <div style={{ background: 'var(--lime-pale)', border: '1.5px dashed var(--lime-d)', color: 'var(--navy)', fontSize: 12, padding: '10px 12px', borderRadius: 10, marginBottom: 12 }}>
+              🔒 <b>Demo mode</b> — your bank would SMS this. Code: <b>{auth.demo_code}</b>
+            </div>
+          )}
+          {err && <PayErr>{err}</PayErr>}
+          <Button variant="lime" disabled={code.length !== 6 || busy} onClick={() => confirm(true)}>{busy ? 'Authenticating…' : 'Authenticate'}</Button>
+          <div style={{ textAlign: 'center', marginTop: 12 }}>
+            <button onClick={() => { setPhase('card'); setErr(''); }} style={{ color: 'var(--gray)', fontSize: 13, fontWeight: 600 }}>← Cancel</button>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="cl-between" style={{ marginBottom: 16 }}>
+            <span className="cl-muted" style={{ fontSize: 13 }}>{description}</span>
+            <span style={{ fontWeight: 900, fontSize: 18 }}>{fmt.money(amountCents)}{recurring ? <span style={{ fontSize: 12, color: 'var(--gray)' }}> / mo</span> : null}</span>
+          </div>
+          <label style={{ display: 'block', marginBottom: 12 }}>
+            <span className="cl-label">Card number</span>
+            <div style={{ position: 'relative' }}>
+              <input className="cl-field" inputMode="numeric" placeholder="1234 1234 1234 1234" value={card}
+                onChange={(e) => setCard(groupCard(e.target.value))} style={{ paddingRight: 64 }} />
+              <span style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', fontSize: 18 }}>💳</span>
+            </div>
+          </label>
+          <div style={{ display: 'flex', gap: 10, marginBottom: 14 }}>
+            <label style={{ flex: 1 }}><span className="cl-label">Expiry</span>
+              <input className="cl-field" placeholder="MM / YY" value={exp} onChange={(e) => setExp(e.target.value)} /></label>
+            <label style={{ flex: 1 }}><span className="cl-label">CVC</span>
+              <input className="cl-field" inputMode="numeric" maxLength={4} placeholder="CVC" value={cvc} onChange={(e) => setCvc(e.target.value.replace(/\D/g, ''))} /></label>
+          </div>
+          <div className="cl-row" style={{ gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
+            <span className="cl-muted" style={{ fontSize: 11 }}>Test cards:</span>
+            {TEST_CARDS.map((t) => (
+              <button key={t.num} onClick={() => setCard(t.num)} style={{ fontSize: 11, fontWeight: 700, padding: '4px 9px', borderRadius: 999, border: '1px solid var(--gray3)', background: card === t.num ? 'var(--navy)' : '#fff', color: card === t.num ? '#fff' : 'var(--gray)' }}>{t.label}</button>
+            ))}
+          </div>
+          {err && <PayErr>{err}</PayErr>}
+          <Button variant="lime" disabled={busy} onClick={() => confirm(false)}>{busy ? 'Processing…' : `${cta} ${fmt.money(amountCents)}`}</Button>
+          <div className="cl-row" style={{ gap: 6, justifyContent: 'center', marginTop: 12, color: 'var(--gray2)', fontSize: 11 }}>
+            <span>🔒 Secured by</span><b style={{ color: 'var(--navy)' }}>Stripe</b><span>· test mode</span>
+          </div>
+        </>
+      )}
+    </Sheet>
+  );
+}
+
+// ── Wallet top-up with promotional bonus tiers (shared) ──
+export const TOPUP_TIERS = [[2000, 5], [5000, 12], [10000, 18], [20000, 20]]; // [minCents, bonusPct] ascending — mirrors server
+export function topupBonus(amount) { let pct = 0; for (const [min, p] of TOPUP_TIERS) if (amount >= min) pct = p; return { bonus: Math.floor((amount * pct) / 100), pct }; }
+const TOPUP_QUICK = [2000, 5000, 10000, 20000];
+
+export function TopUpSheet({ open, onClose, onContinue }) {
+  const [amount, setAmount] = useState(5000);
+  useEffect(() => { if (open) setAmount(5000); }, [open]);
+  const { bonus, pct } = topupBonus(amount);
+  return (
+    <Sheet open={open} onClose={onClose} title="Top up wallet">
+      <Card style={{ background: 'linear-gradient(135deg,#162040,#253470)', color: '#fff', marginBottom: 16 }}>
+        <div className="cl-row" style={{ gap: 12 }}>
+          <span style={{ fontSize: 28 }}>🎁</span>
+          <div><div style={{ fontWeight: 900, fontSize: 16 }}>Top up more, get more</div>
+          <div style={{ fontSize: 13, color: 'rgba(255,255,255,.65)' }}>Earn up to <b style={{ color: 'var(--lime)' }}>20% bonus credit</b> — limited time!</div></div>
+        </div>
+      </Card>
+      <div className="cl-eyebrow" style={{ marginBottom: 10 }}>Choose amount</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+        {TOPUP_QUICK.map((amt) => {
+          const b = topupBonus(amt);
+          const on = amount === amt;
+          return (
+            <Card key={amt} onClick={() => setAmount(amt)} style={{ cursor: 'pointer', border: on ? '2px solid var(--navy)' : '2px solid transparent', padding: 14 }}>
+              <div style={{ fontWeight: 900, fontSize: 18 }}>{fmt.money(amt)}</div>
+              {b.bonus > 0
+                ? <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--lime-d)', marginTop: 2 }}>+{fmt.money(b.bonus)} free</div>
+                : <div className="cl-muted" style={{ fontSize: 12, marginTop: 2 }}>no bonus</div>}
+            </Card>
+          );
+        })}
+      </div>
+      <label style={{ display: 'block', marginBottom: 14 }}>
+        <span className="cl-label">Or enter a custom amount (S$)</span>
+        <input className="cl-field" inputMode="numeric" placeholder="e.g. 75" value={amount ? amount / 100 : ''}
+          onChange={(e) => setAmount(Math.round((parseFloat(e.target.value) || 0) * 100))} />
+      </label>
+      <Card style={{ marginBottom: 16 }}>
+        <PayLine l="You pay" v={fmt.money(amount)} />
+        {bonus > 0 && <PayLine l={`Bonus credit (+${pct}%)`} v={`+ ${fmt.money(bonus)}`} green />}
+        <div className="cl-divider" />
+        <PayLine l={<b>Total credit</b>} v={<b>{fmt.money(amount + bonus)}</b>} />
+      </Card>
+      <Button variant="lime" disabled={amount < 500} onClick={() => onContinue(amount)}>Continue to payment · {fmt.money(amount)}</Button>
+      {amount < 500 && <div className="cl-muted" style={{ fontSize: 12, textAlign: 'center', marginTop: 8 }}>Minimum top-up is S$5</div>}
+    </Sheet>
   );
 }

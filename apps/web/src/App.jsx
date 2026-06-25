@@ -1,19 +1,41 @@
-import React from 'react';
-import { Routes, Route, Link, useNavigate, useLocation } from 'react-router-dom';
-import { Logo, Mark } from '@shared';
+import React, { useEffect } from 'react';
+import { Routes, Route, Link, Navigate, useNavigate, useLocation } from 'react-router-dom';
+import { Logo, Mark, api } from '@shared';
 import Landing from './pages/Landing.jsx';
 import Order from './pages/Order.jsx';
 import Account from './pages/Account.jsx';
+import Login from './pages/Login.jsx';
+import { customerId, getAuth, saveAuth, logout } from './auth.js';
+
+// gate authenticated pages — bounce to /login when there's no session
+function RequireAuth({ children }) {
+  if (customerId()) return children;
+  // a magic-login (?login=) is resolving — don't bounce mid-flight
+  if (new URLSearchParams(window.location.search).get('login')) return null;
+  return <Navigate to="/login" replace />;
+}
 
 export default function App() {
+  // magic-login deep link: /any?login=<customerId> signs in and continues
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const p = url.searchParams.get('login');
+    if (p && !customerId()) {
+      api.get('/api/users/' + p).then((u) => {
+        if (u?.id) { saveAuth(u); url.searchParams.delete('login'); window.location.replace(url.pathname + url.search); }
+      });
+    }
+  }, []);
+
   return (
     <>
       <NavBar />
       <Routes>
         <Route path="/" element={<Landing />} />
-        <Route path="/order" element={<Order />} />
-        <Route path="/account" element={<Account />} />
-        <Route path="/track" element={<Account initialTab="orders" />} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/order" element={<RequireAuth><Order /></RequireAuth>} />
+        <Route path="/account" element={<RequireAuth><Account /></RequireAuth>} />
+        <Route path="/track" element={<RequireAuth><Account initialTab="orders" /></RequireAuth>} />
         <Route path="*" element={<Landing />} />
       </Routes>
       <Footer />
@@ -25,6 +47,7 @@ function NavBar() {
   const nav = useNavigate();
   const { pathname } = useLocation();
   const onLanding = pathname === '/';
+  const auth = getAuth();
   const jump = (id) => {
     if (onLanding) document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' });
     else nav('/#' + id);
@@ -37,8 +60,14 @@ function NavBar() {
           <a onClick={() => jump('how')}>How it works</a>
           <a onClick={() => jump('services')}>Services</a>
           <a onClick={() => jump('pricing')}>Pricing</a>
-          <Link to="/account">Account</Link>
-          <Link to="/order" className="nav-cta">Order now</Link>
+          {auth ? <>
+            <Link to="/account">{auth.name?.split(' ')[0] || 'Account'}</Link>
+            <a onClick={logout}>Log out</a>
+            <Link to="/order" className="nav-cta">Order now</Link>
+          </> : <>
+            <Link to="/login">Log in</Link>
+            <Link to="/order" className="nav-cta">Order now</Link>
+          </>}
         </div>
       </div>
     </nav>

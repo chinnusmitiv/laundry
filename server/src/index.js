@@ -4,6 +4,7 @@ import http from 'http';
 import { Server } from 'socket.io';
 import { db, initSchema } from './db.js';
 import { registerRoutes } from './routes.js';
+import { registerAuthRoutes } from './auth.js';
 
 initSchema();
 
@@ -29,6 +30,7 @@ io.on('connection', (socket) => {
 
 app.get('/api/health', (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
+registerAuthRoutes(app, io);
 registerRoutes(app, io);
 
 const PORT = process.env.PORT || 4000;

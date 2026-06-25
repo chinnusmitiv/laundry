@@ -1,5 +1,6 @@
 import { db, initSchema, GARMENT_FLOW } from './db.js';
 import { nanoid } from 'nanoid';
+import { hashPassword } from './crypto.js';
 
 initSchema();
 
@@ -38,6 +39,10 @@ const cust2 = { id: 'cus_2', role: 'customer', name: 'Jordan Lee', email: 'jorda
 
 const insUser = db.prepare('INSERT INTO users (id,role,name,email,phone,avatar,facility_id,created_at) VALUES (@id,@role,@name,@email,@phone,@avatar,@facility_id,@created_at)');
 for (const u of [hq, opsCentral, opsEast, opsWest, driver1, driver2, cust1, cust2]) insUser.run({ ...u, created_at: now() });
+
+// demo customers can sign in with password "password"
+const setPw = db.prepare('UPDATE users SET password_hash = ? WHERE id = ?');
+for (const c of [cust1, cust2]) setPw.run(hashPassword('password'), c.id);
 
 // ---- addresses ----
 const insAddr = db.prepare('INSERT INTO addresses (id,user_id,label,line1,line2,city,postcode,lat,lng,is_default) VALUES (@id,@user_id,@label,@line1,@line2,@city,@postcode,@lat,@lng,@is_default)');

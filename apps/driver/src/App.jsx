@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import QRCode from 'qrcode';
 import {
-  api, fmt, getSocket, useSocket, STATUS_FLOW, STATUS_LABEL,
+  api, fmt, getSocket, useSocket, STATUS_FLOW, STATUS_LABEL, GARMENT_LABEL, HANDOVER,
   Logo, Button, Card, Chip, Avatar, StatusPill, TopBar, Sheet, Empty, OneMap,
 } from '@shared';
 
@@ -169,6 +169,13 @@ function JobDetail({ jobId, onClose }) {
             <div style={{ fontWeight: 700, fontSize: 14 }}>📍 {job.address?.label}</div>
             <div className="cl-muted" style={{ fontSize: 13, marginTop: 2 }}>{job.address?.line1}{job.address?.line2 ? `, ${job.address.line2}` : ''}, {job.address?.city} {job.address?.postcode}</div>
           </div>
+          {job.handover && HANDOVER[job.handover] && (
+            <div className="cl-row" style={{ gap: 10, marginTop: 10, background: 'var(--lime-pale)', border: '1.5px solid var(--lime-d)', borderRadius: 12, padding: '10px 12px' }}>
+              <span style={{ fontSize: 20 }}>{HANDOVER[job.handover].icon}</span>
+              <div><div style={{ fontWeight: 800, fontSize: 14, color: 'var(--navy)' }}>{HANDOVER[job.handover].label}</div>
+              <div style={{ fontSize: 12, color: 'var(--navy)', opacity: .75 }}>{job.handover_contact || HANDOVER[job.handover].sub}</div></div>
+            </div>
+          )}
           <div className="cl-row" style={{ gap: 8, marginTop: 12 }}>
             <Button sm variant="ghost" onClick={() => window.open(`tel:${job.customer?.phone}`)} style={{ flex: 1 }}>📞 Call</Button>
             <Button sm variant="ghost" onClick={() => window.open(`https://maps.google.com/?q=${job.address?.lat},${job.address?.lng}`)} style={{ flex: 1 }}>🧭 Navigate</Button>
@@ -202,6 +209,9 @@ function JobDetail({ jobId, onClose }) {
           {job.items.map((i) => <div key={i.id} className="cl-between" style={{ fontSize: 14, padding: '4px 0' }}><span>{i.name}{i.weight_kg ? ` (${i.weight_kg}kg)` : i.qty > 1 ? ` ×${i.qty}` : ''}</span><span className="cl-muted">{fmt.money(i.price_cents)}</span></div>)}
         </Card>
 
+        {/* garment tags: print + scan */}
+        <TagCard job={job} />
+
         {/* primary action */}
         {a && <Button variant="lime" style={{ marginBottom: 10 }} disabled={busy} onClick={advance}>{busy ? '…' : a.label}</Button>}
 
@@ -215,6 +225,41 @@ function JobDetail({ jobId, onClose }) {
         <ReviewQR open={qrOpen} onClose={() => setQrOpen(false)} orderId={jobId} />
       </>}
     </Sheet>
+  );
+}
+
+// ── garment tags: print QR tags + scan to advance status
+function TagCard({ job }) {
+  const [tags, setTags] = useState([]);
+  const [scan, setScan] = useState('');
+  const [msg, setMsg] = useState('');
+
+  const printTags = async () => {
+    const g = await api.post(`/api/orders/${job.id}/generate-tags`);
+    setTags(g);
+    const parts = [];
+    for (const t of g) parts.push(`<div style="display:inline-flex;flex-direction:column;align-items:center;border:1.5px solid #1D2951;border-radius:12px;padding:12px;margin:6px;width:170px;font-family:-apple-system,sans-serif"><img src="${await QRCode.toDataURL(t.tag_code, { margin: 1, width: 200, color: { dark: '#1D2951', light: '#FFFFFF' } })}" width="140" height="140"/><div style="font-weight:800;margin-top:6px;color:#1D2951">${t.tag_code}</div><div style="font-size:11px;color:#555">${t.type || ''}</div><div style="font-size:9px;color:#999;letter-spacing:1px">CHASELAUNDRY</div></div>`);
+    const w = window.open('', '_blank');
+    w.document.write(`<html><head><title>Tags ${job.code}</title></head><body onload="window.print()" style="text-align:center">${parts.join('')}</body></html>`);
+    w.document.close();
+  };
+
+  const doScan = async () => {
+    const code = scan.trim().toUpperCase(); if (!code) return;
+    try { const g = await api.post(`/api/garments/by-tag/${code}/advance`, { actor: 'scan' }); setMsg(`✓ ${g.tag_code} → ${GARMENT_LABEL[g.status] || g.status}`); setScan(''); }
+    catch { setMsg(`✗ ${code} not found`); }
+  };
+
+  return (
+    <Card style={{ marginBottom: 14 }}>
+      <div className="cl-eyebrow" style={{ marginBottom: 10 }}>🏷️ Garment tags</div>
+      <Button sm variant="ghost" onClick={printTags} style={{ marginBottom: 10 }}>🖨️ Print tags ({job.items?.length || 0} item{job.items?.length === 1 ? '' : 's'})</Button>
+      <div className="cl-row" style={{ gap: 8 }}>
+        <input className="cl-field" placeholder="Scan / type tag e.g. CL-1042-01" value={scan} onChange={(e) => setScan(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && doScan()} />
+        <Button sm variant="lime" onClick={doScan} style={{ whiteSpace: 'nowrap' }}>Scan</Button>
+      </div>
+      {msg && <div style={{ fontSize: 13, fontWeight: 700, marginTop: 8, color: msg[0] === '✓' ? 'var(--ok)' : 'var(--danger)' }}>{msg}</div>}
+    </Card>
   );
 }
 
