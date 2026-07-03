@@ -5,8 +5,9 @@ import fs from 'fs';
 import { hashPassword } from './crypto.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dbPath = path.join(__dirname, '..', 'data', 'chaselaundry.db');
-fs.mkdirSync(path.join(__dirname, '..', 'data'), { recursive: true });
+// DB_PATH lets a host with an ephemeral filesystem (e.g. Render) point this at a mounted persistent disk.
+const dbPath = process.env.DB_PATH || path.join(__dirname, '..', 'data', 'chaselaundry.db');
+fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
 export const db = new DatabaseSync(dbPath);
 db.exec('PRAGMA journal_mode = WAL');
@@ -251,6 +252,16 @@ export function initSchema() {
   migrateRepeatOrders();
   migrateLoadWash();
   migrateB2B();
+  seedOpsAdminIfMissing();
+}
+
+// Ensure a default ops admin login exists, without touching any other data
+// (safe to run against a live/production DB that was never through seed.js).
+function seedOpsAdminIfMissing() {
+  const row = db.prepare(`SELECT value FROM settings WHERE key = 'ops_admin'`).get();
+  if (row) return;
+  db.prepare(`INSERT INTO settings (key, value) VALUES ('ops_admin', ?)`)
+    .run(JSON.stringify({ username: 'admin', password_hash: hashPassword('chaselaundry') }));
 }
 
 // Add repeat-order preference to orders (idempotent).
