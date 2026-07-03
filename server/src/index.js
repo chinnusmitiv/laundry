@@ -5,8 +5,16 @@ import { Server } from 'socket.io';
 import { db, initSchema } from './db.js';
 import { registerRoutes } from './routes.js';
 import { registerAuthRoutes } from './auth.js';
+import { runSeed } from './seed.js';
 
 initSchema();
+
+// Auto-seed demo data on an empty database — covers hosts with no persistent
+// disk (e.g. Render free tier), where every deploy/restart wipes the DB.
+if (db.prepare('SELECT COUNT(*) c FROM users').get().c === 0) {
+  console.log('⚠  Empty database — seeding demo data...');
+  runSeed();
+}
 
 const app = express();
 app.use(cors());

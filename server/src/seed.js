@@ -1,16 +1,20 @@
 import { db, initSchema, GARMENT_FLOW } from './db.js';
 import { nanoid } from 'nanoid';
 import { hashPassword } from './crypto.js';
+import { pathToFileURL } from 'url';
 
-initSchema();
+// Populates the DB with demo data (POC: clean slate each run). Exported so the
+// server can auto-seed on boot when the DB is empty (e.g. an ephemeral host
+// with no persistent disk) — importing this module never runs it by itself.
+export function runSeed() {
+  initSchema();
 
-// wipe (POC: clean slate each seed)
-const tables = ['reviews', 'referrals', 'credits', 'support_messages', 'support_threads',
-  'notifications', 'driver_locations', 'shifts', 'transfers', 'garment_events', 'garments', 'order_items', 'orders',
-  'subscriptions', 'plans', 'business_rates', 'facility_pricing', 'catalog', 'addresses', 'facilities', 'users', 'settings'];
-db.exec('PRAGMA foreign_keys = OFF');
-for (const t of tables) db.exec(`DELETE FROM ${t}`);
-db.exec('PRAGMA foreign_keys = ON');
+  const tables = ['reviews', 'referrals', 'credits', 'support_messages', 'support_threads',
+    'notifications', 'driver_locations', 'shifts', 'transfers', 'garment_events', 'garments', 'order_items', 'orders',
+    'subscriptions', 'plans', 'business_rates', 'facility_pricing', 'catalog', 'addresses', 'facilities', 'users', 'settings'];
+  db.exec('PRAGMA foreign_keys = OFF');
+  for (const t of tables) db.exec(`DELETE FROM ${t}`);
+  db.exec('PRAGMA foreign_keys = ON');
 
 const now = () => new Date().toISOString();
 const hoursFromNow = (h) => new Date(Date.now() + h * 3600e3).toISOString();
@@ -249,9 +253,15 @@ for (const [facId, pricing] of Object.entries(whPricing)) {
   }
 }
 
-console.log('✅ Seeded ChaseLaundry POC database.');
-console.log('   Customers:  cus_1 (Alex, on Plus), cus_2 (Jordan)');
-console.log('   Drivers:    drv_1 (Marcus, on shift), drv_2 (Priya) — log in with marcus@chaselaundry.com / priya@chaselaundry.com, password "password"');
-console.log('   Warehouses: Central Hub, East Hub, West Hub');
-console.log('   Ops:        ops_hq (HQ), ops_central, ops_east, ops_west — Ops admin login: admin / chaselaundry');
-db.close();
+  console.log('✅ Seeded ChaseLaundry POC database.');
+  console.log('   Customers:  cus_1 (Alex, on Plus), cus_2 (Jordan)');
+  console.log('   Drivers:    drv_1 (Marcus, on shift), drv_2 (Priya) — log in with marcus@chaselaundry.com / priya@chaselaundry.com, password "password"');
+  console.log('   Warehouses: Central Hub, East Hub, West Hub');
+  console.log('   Ops:        ops_hq (HQ), ops_central, ops_east, ops_west — Ops admin login: admin / chaselaundry');
+}
+
+// `npm run seed` invokes this file directly — importing it elsewhere (e.g. server boot) must not auto-run it.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  runSeed();
+  db.close();
+}
