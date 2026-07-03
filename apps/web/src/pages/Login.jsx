@@ -54,6 +54,11 @@ export default function Login() {
             We'll email you a 6-digit code.
           </p>
         </> : <>
+          {sent?.dev_code && (
+            <div style={{ background: 'rgba(199,255,51,.15)', color: 'var(--navy)', fontSize: 13, fontWeight: 700, padding: '10px 12px', borderRadius: 10, marginBottom: 14, textAlign: 'center' }}>
+              Demo mode — your code is <b style={{ letterSpacing: '2px' }}>{sent.dev_code}</b>
+            </div>
+          )}
           {sent?.is_new && <>
             <label className="cl-label">Your name</label>
             <input className="cl-field" style={{ width: '100%', marginBottom: 14 }} placeholder="e.g. Alex Morgan" value={name} onChange={(e) => setName(e.target.value)} />

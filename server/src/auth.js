@@ -2,7 +2,6 @@ import { nanoid } from 'nanoid';
 import { randomInt } from 'node:crypto';
 import { db } from './db.js';
 import { verifyPassword } from './crypto.js';
-import { sendRealEmail } from './services.js';
 
 const now = () => new Date().toISOString();
 const id = (p) => `${p}_${nanoid(8)}`;
@@ -41,21 +40,15 @@ function mask(c) {
 }
 
 export function registerAuthRoutes(app, io) {
-  // ---- step 1: request a one-time code (sent by real email) ----
-  app.post('/api/auth/request-otp', async (req, res) => {
+  // ---- step 1: request a one-time code (demo mode: code is returned to the client, not emailed) ----
+  app.post('/api/auth/request-otp', (req, res) => {
     const c = classify(req.body.identifier);
     if (!c.valid) return res.status(400).json({ error: c.error });
 
     const code = String(randomInt(0, 1000000)).padStart(6, '0');
-    try {
-      await sendRealEmail({ to: c.email, subject: 'Your ChaseLaundry login code', body: `Your ChaseLaundry login code is ${code}. It expires in 5 minutes.` });
-    } catch (e) {
-      console.error('OTP email failed to send:', e.message);
-      return res.status(500).json({ error: 'Could not send the login email. Please try again shortly.' });
-    }
     otpStore.set(c.email, { code, expiresAt: Date.now() + OTP_TTL_MS, attempts: 0 });
 
-    res.json({ sent_to: mask(c), is_new: !findUser(c) });
+    res.json({ sent_to: mask(c), is_new: !findUser(c), dev_code: code });
   });
 
   // ---- step 2: verify the code (logs in, or creates the account) ----

@@ -147,6 +147,12 @@ function AuthScreen({ onAuth }) {
               We sent a 6-digit code to <b style={{ color: 'var(--navy)' }}>{sent?.sent_to}</b>.
             </div>
 
+            {sent?.dev_code && (
+              <div style={{ background: 'rgba(199,255,51,.15)', color: 'var(--navy)', fontSize: 13, fontWeight: 700, padding: '10px 12px', borderRadius: 10, marginBottom: 14, textAlign: 'center' }}>
+                Demo mode — your code is <b style={{ letterSpacing: '2px' }}>{sent.dev_code}</b>
+              </div>
+            )}
+
             {sent?.is_new && (
               <Field label="Your name" placeholder="e.g. Alex Morgan" value={name} onChange={(e) => setName(e.target.value)} />
             )}

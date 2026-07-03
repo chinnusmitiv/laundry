@@ -105,7 +105,7 @@ function OpsConsole({ onLogout }) {
         <button onClick={switchConsole} style={{ marginTop: 'auto', display: 'flex', alignItems: 'center', gap: 10, color: 'rgba(255,255,255,.6)', fontSize: 13, padding: '10px 0' }}>
           <Avatar name={scope.name} size={32} /> Switch console ↺
         </button>
-        <button onClick={onLogout} style={{ color: 'rgba(255,255,255,.4)', fontSize: 12, padding: '4px 0 0 42px' }}>Log out</button>
+        <button onClick={onLogout} style={{ color: 'var(--danger)', fontWeight: 700, fontSize: 13, padding: '8px 0', marginLeft: 42, borderTop: '1px solid rgba(255,255,255,.1)', marginTop: 4, textAlign: 'left' }}>Log out</button>
       </aside>
       <main className="ops-main">
         {view === 'dashboard' && <Dashboard stats={stats} onGo={setView} scope={scope} />}
