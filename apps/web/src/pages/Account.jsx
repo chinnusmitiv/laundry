@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
-  api, fmt, getSocket, useSocket, STATUS_FLOW, STATUS_LABEL, GARMENT_LABEL, HANDOVER, TICKET_CATEGORIES,
+  api, fmt, getSocket, useSocket, STATUS_FLOW, STATUS_LABEL, GARMENT_LABEL, HANDOVER, TICKET_CATEGORIES, REPEAT_CADENCE, nextRepeatDue,
   StatusPill, OneMap, GarmentJourney, Avatar, Empty, PaymentSheet, TopUpSheet, topupBonus, distKm, etaMins, printInvoice,
 } from '@shared';
 import { customerId, logout } from '../auth.js';
@@ -41,15 +42,28 @@ export default function Account({ initialTab = 'orders' }) {
 
 // ───────── ORDERS + LIVE TRACKING
 function Orders() {
+  const nav = useNavigate();
   const [orders, setOrders] = useState([]);
   const [sel, setSel] = useState(null);
   const load = useCallback(() => api.get(`/api/customers/${CUSTOMER_ID}/orders`).then((o) => { setOrders(o); setSel((s) => s || o.find((x) => !['completed', 'cancelled'].includes(x.status))?.id || o[0]?.id); }), []);
   useEffect(() => { load(); }, [load]);
   useSocket({ 'order:updated': load, 'notification': load }, { userId: CUSTOMER_ID, role: 'customer' }, []);
+  const due = orders[0] && nextRepeatDue(orders[0]);
+  const dueNow = due && due <= new Date();
 
   return (
     <div className="two-col">
-      <div>{sel ? <OrderDetail orderId={sel} /> : <div className="panel"><Empty icon="📦" title="No orders yet" /></div>}</div>
+      <div>
+        {dueNow && (
+          <div className="panel" style={{ marginBottom: 14, background: 'var(--navy)', color: '#fff', cursor: 'pointer' }} onClick={() => nav('/order')}>
+            <div className="cl-between">
+              <div><b>🔁 Time for your {REPEAT_CADENCE[orders[0].repeat_cadence]?.label.toLowerCase() || 'repeat'} order</b><div className="cl-muted" style={{ fontSize: 12, color: 'rgba(255,255,255,.6)' }}>Same as last time — schedule your next pickup?</div></div>
+              <button className="cl-btn cl-btn-lime cl-btn-sm" style={{ width: 'auto' }}>Schedule</button>
+            </div>
+          </div>
+        )}
+        {sel ? <OrderDetail orderId={sel} /> : <div className="panel"><Empty icon="📦" title="No orders yet" /></div>}
+      </div>
       <div>
         <button className="cl-btn cl-btn-ghost cl-btn-sm" style={{ marginBottom: 12, width: 'auto', border: '1.5px dashed var(--navy)' }}
           onClick={async () => { const o = await api.post(`/api/demo/customers/${CUSTOMER_ID}/spawn-tracking`); load(); setSel(o.id); }}>🚗 Demo: track a live driver</button>
@@ -160,7 +174,7 @@ function OrderDetail({ orderId }) {
       <div className="cl-eyebrow" style={{ marginBottom: 8 }}>Receipt</div>
       {o.items.map((i) => <div key={i.id} className="cl-between" style={{ fontSize: 14, padding: '3px 0' }}><span>{i.name}{i.weight_kg ? ` (${i.weight_kg}kg)` : i.qty > 1 ? ` ×${i.qty}` : ''}</span><span className="cl-muted">{fmt.money(i.price_cents)}</span></div>)}
       <div className="cl-divider" />
-      <div className="cl-between" style={{ fontSize: 14 }}><span className="cl-muted">Platform fee</span><span>{fmt.money(o.platform_fee_cents)}</span></div>
+      <div className="cl-between" style={{ fontSize: 14 }}><span className="cl-muted">Service fee</span><span>{o.platform_fee_cents ? fmt.money(o.platform_fee_cents) : 'WAIVED'}</span></div>
       {o.discount_cents > 0 && <div className="cl-between" style={{ fontSize: 14 }}><span className="cl-muted">Discount</span><span style={{ color: 'var(--ok)' }}>– {fmt.money(o.discount_cents)}</span></div>}
       {o.credit_applied_cents > 0 && <div className="cl-between" style={{ fontSize: 14 }}><span className="cl-muted">Wallet credit</span><span style={{ color: 'var(--ok)' }}>– {fmt.money(o.credit_applied_cents)}</span></div>}
       <div className="cl-between" style={{ marginTop: 6 }}><b>Total</b><b>{fmt.money(o.total_cents)}</b></div>

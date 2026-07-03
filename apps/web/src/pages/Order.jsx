@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api, fmt, PlacesAutocomplete, HANDOVER, ADDRESS_TYPES } from '@shared';
+import { api, fmt, PlacesAutocomplete, HANDOVER, ADDRESS_TYPES, REPEAT_CADENCE } from '@shared';
 import { customerId } from '../auth.js';
 
 const CUSTOMER_ID = customerId();
@@ -22,6 +22,8 @@ export default function Order() {
   const [notes, setNotes] = useState('');
   const [handover, setHandover] = useState('hand_to_me');
   const [handoverContact, setHandoverContact] = useState('');
+  const [repeat, setRepeat] = useState(false);
+  const [repeatCadence, setRepeatCadence] = useState('weekly');
 
   useEffect(() => {
     api.get('/api/catalog').then(setCatalog);
@@ -54,7 +56,7 @@ export default function Order() {
   const setItem = (id, patch) => setCart((c) => ({ ...c, [id]: { ...c[id], ...patch } }));
   const place = async () => {
     setPlacing(true);
-    const o = await api.post('/api/orders', { customer_id: CUSTOMER_ID, address_id: addrId, items, pickup_slot: slot, return_slot: 'Thu · 18:00–20:00', use_credit: useCredit, notes, handover, handover_contact: handover === 'someone_else' ? handoverContact : null });
+    const o = await api.post('/api/orders', { customer_id: CUSTOMER_ID, address_id: addrId, items, pickup_slot: slot, return_slot: 'Thu · 18:00–20:00', use_credit: useCredit, notes, handover, handover_contact: handover === 'someone_else' ? handoverContact : null, repeat_requested: repeat, repeat_cadence: repeat ? repeatCadence : null });
     setPlacing(false); setPlaced(o); setStep(4);
   };
 
@@ -157,9 +159,8 @@ export default function Order() {
               <h2 style={{ fontWeight: 900, marginBottom: 16 }}>Review & confirm</h2>
               {!quote ? <p>Calculating…</p> : <>
                 <Row l="Subtotal" v={fmt.money(quote.subtotal_cents)} />
-                <Row l="Platform fee" v={fmt.money(quote.platform_fee_cents)} />
+                <Row l="Service fee" v={quote.platform_fee_cents ? fmt.money(quote.platform_fee_cents) : 'WAIVED'} />
                 <Row l="Delivery" v={quote.delivery_fee_cents ? fmt.money(quote.delivery_fee_cents) : 'FREE'} />
-                {quote.discount_cents > 0 && <Row l={`${summary?.subscription?.plan_name || 'Plan'} discount`} v={`– ${fmt.money(quote.discount_cents)}`} green />}
                 {quote.credit_applied_cents > 0 && <Row l="Wallet credit" v={`– ${fmt.money(quote.credit_applied_cents)}`} green />}
                 <div className="cl-divider" />
                 <Row l={<b style={{ fontSize: 18 }}>Total today</b>} v={<b style={{ fontSize: 18 }}>{fmt.money(quote.total_cents)}</b>} />
@@ -167,6 +168,17 @@ export default function Order() {
                   <span style={{ fontWeight: 700 }}>Use wallet credit ({fmt.money(summary?.balance_cents || 0)})</span>
                   <span style={{ width: 44, height: 26, borderRadius: 999, background: useCredit ? 'var(--lime)' : 'var(--gray3)', position: 'relative' }}><span style={{ position: 'absolute', top: 3, left: useCredit ? 21 : 3, width: 20, height: 20, borderRadius: 20, background: '#fff' }} /></span>
                 </label>
+                <label className="cl-between" style={{ marginTop: 12, cursor: 'pointer' }} onClick={() => setRepeat((x) => !x)}>
+                  <span style={{ fontWeight: 700 }}>🔁 Repeat this order</span>
+                  <span style={{ width: 44, height: 26, borderRadius: 999, background: repeat ? 'var(--lime)' : 'var(--gray3)', position: 'relative' }}><span style={{ position: 'absolute', top: 3, left: repeat ? 21 : 3, width: 20, height: 20, borderRadius: 20, background: '#fff' }} /></span>
+                </label>
+                {repeat && (
+                  <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                    {Object.entries(REPEAT_CADENCE).map(([k, c]) => (
+                      <button key={k} type="button" onClick={() => setRepeatCadence(k)} className={`cl-btn cl-btn-sm ${repeatCadence === k ? 'cl-btn-lime' : 'cl-btn-ghost'}`} style={{ width: 'auto', flex: 1 }}>{c.label}</button>
+                    ))}
+                  </div>
+                )}
                 <div style={{ display: 'flex', gap: 12, marginTop: 22 }}>
                   <button className="cl-btn cl-btn-ghost" style={{ width: 'auto' }} onClick={() => setStep(2)}>← Back</button>
                   <button className="cl-btn cl-btn-lime" style={{ width: 'auto' }} disabled={placing} onClick={place}>{placing ? 'Placing…' : 'Place order'}</button>

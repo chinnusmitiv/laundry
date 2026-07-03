@@ -2,13 +2,52 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import QRCode from 'qrcode';
 import {
   api, fmt, useSocket, getSocket, STATUS_FLOW, STATUS_LABEL, GARMENT_FLOW, GARMENT_LABEL,
-  Logo, Button, Chip, Avatar, StatusPill, Empty, OneMap, GarmentJourney, FleetMap, PlacesAutocomplete, printInvoice, distKm,
+  Logo, Button, Chip, Field, Avatar, StatusPill, Empty, OneMap, GarmentJourney, FleetMap, PlacesAutocomplete, printInvoice, distKm,
   downloadCsv, parseCsv,
 } from '@shared';
 
 const qs = (facilityId) => (facilityId ? `?facility_id=${facilityId}` : '');
 
+// ─────────────────────────────────────── ADMIN AUTH (single shared Ops login)
+const OPS_AUTH_KEY = 'cl_ops_admin';
+const isOpsAuthed = () => localStorage.getItem(OPS_AUTH_KEY) === '1';
+
 export default function App() {
+  const [authed, setAuthed] = useState(isOpsAuthed);
+  if (!authed) return <AdminLogin onAuth={() => { localStorage.setItem(OPS_AUTH_KEY, '1'); setAuthed(true); }} />;
+  return <OpsConsole onLogout={() => { localStorage.removeItem(OPS_AUTH_KEY); localStorage.removeItem('cl_ops_scope'); setAuthed(false); }} />;
+}
+
+function AdminLogin({ onAuth }) {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  const submit = async () => {
+    setErr(''); setBusy(true);
+    try { await api.post('/api/auth/ops-login', { username, password }); onAuth(); }
+    catch (e) { setErr(e.message || 'Could not sign in.'); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div style={{ minHeight: '100vh', background: 'var(--navy2)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+      <div style={{ width: '100%', maxWidth: 380 }}>
+        <div style={{ textAlign: 'center', marginBottom: 26 }}><Logo size={26} theme="dark" tagline /></div>
+        <div className="cl-card" style={{ padding: 24, background: '#fff' }}>
+          <div className="cl-eyebrow" style={{ marginBottom: 14 }}>Ops admin sign in</div>
+          <Field label="Username" autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
+          <Field label="Password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
+          {err && <div style={{ background: 'rgba(239,68,68,.1)', color: 'var(--danger)', fontSize: 13, fontWeight: 600, padding: '10px 12px', borderRadius: 10, marginBottom: 12 }}>{err}</div>}
+          <Button variant="lime" disabled={!username.trim() || !password || busy} onClick={submit}>{busy ? 'Signing in…' : 'Sign in'}</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function OpsConsole({ onLogout }) {
   const [scope, setScope] = useState(() => { try { return JSON.parse(localStorage.getItem('cl_ops_scope')); } catch { return null; } });
   const [view, setView] = useState('dashboard');
   const [stats, setStats] = useState(null);
@@ -66,10 +105,11 @@ export default function App() {
         <button onClick={switchConsole} style={{ marginTop: 'auto', display: 'flex', alignItems: 'center', gap: 10, color: 'rgba(255,255,255,.6)', fontSize: 13, padding: '10px 0' }}>
           <Avatar name={scope.name} size={32} /> Switch console ↺
         </button>
+        <button onClick={onLogout} style={{ color: 'rgba(255,255,255,.4)', fontSize: 12, padding: '4px 0 0 42px' }}>Log out</button>
       </aside>
       <main className="ops-main">
         {view === 'dashboard' && <Dashboard stats={stats} onGo={setView} scope={scope} />}
-        {view === 'orders' && <OrdersBoard facilityId={facilityId} isHQ={isHQ} />}
+        {view === 'orders' && <OrdersBoard facilityId={facilityId} isHQ={isHQ} opsId={scope?.opsId} />}
         {view === 'facility' && <Facility facilityId={facilityId} />}
         {view === 'drivers' && isHQ && <Drivers />}
         {view === 'customers' && isHQ && <CustomersView />}
@@ -167,7 +207,7 @@ function LiveMapPanel() {
 }
 
 // ───────────────────────── ORDERS BOARD
-function OrdersBoard({ facilityId, isHQ }) {
+function OrdersBoard({ facilityId, isHQ, opsId }) {
   const [orders, setOrders] = useState([]);
   const [drivers, setDrivers] = useState([]);
   const [facilities, setFacilities] = useState([]);
@@ -190,7 +230,7 @@ function OrdersBoard({ facilityId, isHQ }) {
   }, [load]);
   useSocket({ 'order:updated': load, 'order:new': load }, { role: 'ops' }, [facilityId]);
 
-  const assignDriver = async (orderId, driver_id) => { await api.post(`/api/orders/${orderId}/assign`, { driver_id }); load(); };
+  const assignDriver = async (orderId, driver_id) => { await api.post(`/api/orders/${orderId}/assign`, { driver_id, ops_id: opsId }); load(); };
   const assignFacility = async (orderId, facility_id) => { await api.post(`/api/orders/${orderId}/assign-facility`, { facility_id }); load(); };
   const filtered = filter === 'all' ? orders : filter === 'active' ? orders.filter((o) => !['completed', 'cancelled'].includes(o.status)) : orders.filter((o) => o.status === filter);
 
@@ -258,10 +298,12 @@ function OrdersBoard({ facilityId, isHQ }) {
                   : <Chip variant="navy">{o.facility?.name || '—'}</Chip>}
               </td>
               <td onClick={(e) => e.stopPropagation()}>
-                <select className="ops-select" value={o.driver_id || ''} onChange={(e) => assignDriver(o.id, e.target.value)}>
-                  <option value="" disabled>Assign…</option>
-                  {drivers.map((d) => <option key={d.id} value={d.id}>{d.name}{d.shift ? ' ●' : ''}</option>)}
-                </select>
+                {isHQ
+                  ? <select className="ops-select" value={o.driver_id || ''} onChange={(e) => assignDriver(o.id, e.target.value)}>
+                      <option value="" disabled>Assign…</option>
+                      {drivers.map((d) => <option key={d.id} value={d.id}>{d.name}{d.shift ? ' ●' : ''}</option>)}
+                    </select>
+                  : <Chip variant="navy">{o.driver?.name || 'Unassigned'}</Chip>}
               </td>
               <td style={{ fontWeight: 700 }}>{fmt.money(o.total_cents)}</td>
               <td><Chip variant={o.payment_status === 'paid' ? 'navy' : 'gray'}>{o.payment_status}</Chip></td>
@@ -306,23 +348,34 @@ function NewOrderModal({ facilityId, onClose, onCreated }) {
   const [facId, setFacId] = useState(facilityId || '');
   const [drvId, setDrvId] = useState('');
   const [busy, setBusy] = useState(false);
+  const [rates, setRates] = useState({}); // catalog_id -> negotiated rate_cents for the matched business
+
+  const isBiz = mode === 'business';
+  const matchedBiz = businesses.find((b) => b.name.toLowerCase() === bizName.trim().toLowerCase());
 
   useEffect(() => {
     api.get('/api/users?role=customer').then(setCustomers);
     api.get('/api/ops/businesses').then(setBusinesses);
-    api.get('/api/catalog').then(setCatalog);
     api.get('/api/facilities').then(setFacilities);
     api.get('/api/ops/drivers').then(setDrivers);
   }, []);
+  // B2B and B2C are entirely different catalogs (linens/towels vs retail services)
+  useEffect(() => { api.get(`/api/catalog?scope=${isBiz ? 'b2b' : 'b2c'}`).then(setCatalog); setCart({}); }, [isBiz]);
   useEffect(() => {
     if (!custId) { setAddresses([]); setAddrId(''); return; }
     api.get(`/api/customers/${custId}/summary`).then((s) => { setAddresses(s.addresses || []); setAddrId((s.addresses?.find((a) => a.is_default) || s.addresses?.[0])?.id || ''); });
   }, [custId]);
+  // once we recognise an existing business by name, pull their negotiated rates
+  useEffect(() => {
+    if (isBiz && matchedBiz) api.get(`/api/ops/business/${matchedBiz.id}/rates`).then((rows) => setRates(Object.fromEntries(rows.map((r) => [r.id, r.rate_cents]))));
+    else setRates({});
+  }, [isBiz, matchedBiz?.id]);
 
-  const isBiz = mode === 'business';
+  const unitLabel = (u) => (u === 'per_kg' ? 'kg' : u === 'per_bag' ? 'bag' : 'item');
   const setItem = (cid, patch) => setCart((c) => ({ ...c, [cid]: { ...c[cid], ...patch } }));
-  // unit price in cents — B2B can override the catalog rate at runtime
-  const unitCents = (c, v) => (isBiz && v.unit != null && v.unit !== '' ? Math.round((parseFloat(v.unit) || 0) * 100) : c.price_cents);
+  const defaultUnitDollars = (c) => (rates[c.id] != null ? rates[c.id] : c.price_cents) / 100;
+  // unit price in cents — B2B can override the catalog/negotiated rate at runtime, for one-off exceptions
+  const unitCents = (c, v) => (isBiz && v.unit != null && v.unit !== '' ? Math.round((parseFloat(v.unit) || 0) * 100) : isBiz ? Math.round(defaultUnitDollars(c) * 100) : c.price_cents);
   const lineCents = (c, v) => { const n = c.unit === 'per_kg' ? (v.weight || 0) : (v.qty || 0); return Math.round(unitCents(c, v) * n); };
   const items = catalog.filter((c) => { const v = cart[c.id] || {}; return (v.qty || v.weight) > 0; }).map((c) => {
     const v = cart[c.id] || {};
@@ -330,6 +383,11 @@ function NewOrderModal({ facilityId, onClose, onCreated }) {
   });
   const subtotalCents = catalog.reduce((s, c) => s + lineCents(c, cart[c.id] || {}), 0);
   const ready = items.length && (isBiz ? bizName.trim() : custId);
+  const saveRate = async (catalogId, dollars) => {
+    if (!matchedBiz) return;
+    await api.post(`/api/ops/business/${matchedBiz.id}/rates`, { catalog_id: catalogId, price_cents: Math.round((parseFloat(dollars) || 0) * 100) });
+    setRates((r) => ({ ...r, [catalogId]: Math.round((parseFloat(dollars) || 0) * 100) }));
+  };
 
   const [err, setErr] = useState('');
   const create = async () => {
@@ -393,10 +451,11 @@ function NewOrderModal({ facilityId, onClose, onCreated }) {
             const per = c.unit === 'per_kg';
             const val = per ? (v.weight || 0) : (v.qty || 0);
             const step = per ? 0.5 : 1;
+            const unit = unitLabel(c.unit);
             return (
               <div key={c.id} style={{ padding: '8px 0', borderBottom: '1px solid var(--gray3)' }}>
                 <div className="cl-between">
-                  <span>{c.icon} {c.name} <span className="cl-muted" style={{ fontSize: 12 }}>{fmt.money(c.price_cents)}/{per ? 'kg' : 'item'}</span></span>
+                  <span>{c.icon} {c.name} <span className="cl-muted" style={{ fontSize: 12 }}>{fmt.money(isBiz ? defaultUnitDollars(c) * 100 : c.price_cents)}/{unit}{isBiz && rates[c.id] != null && <b style={{ color: 'var(--navy)' }}> · negotiated</b>}</span></span>
                   <div className="cl-row" style={{ gap: 8 }}>
                     <button onClick={() => setItem(c.id, per ? { weight: Math.max(0, +(val - step).toFixed(1)) } : { qty: Math.max(0, val - step) })} style={stepBtn}>−</button>
                     <b style={{ minWidth: 40, textAlign: 'center' }}>{val || 0}{per && val ? 'kg' : ''}</b>
@@ -406,9 +465,10 @@ function NewOrderModal({ facilityId, onClose, onCreated }) {
                 {isBiz && val > 0 && (
                   <div className="cl-between" style={{ marginTop: 6 }}>
                     <label className="cl-row" style={{ gap: 6, fontSize: 12 }}>
-                      <span className="cl-muted">Contract S$ / {per ? 'kg' : 'item'}</span>
-                      <input className="cl-field" style={{ width: 86, padding: '6px 8px' }} value={v.unit ?? (c.price_cents / 100)} onChange={(e) => setItem(c.id, { unit: e.target.value })} />
+                      <span className="cl-muted">Contract S$ / {unit}</span>
+                      <input className="cl-field" style={{ width: 86, padding: '6px 8px' }} value={v.unit ?? defaultUnitDollars(c)} onChange={(e) => setItem(c.id, { unit: e.target.value })} />
                     </label>
+                    {matchedBiz && <button onClick={() => saveRate(c.id, v.unit ?? defaultUnitDollars(c))} style={{ fontSize: 11, fontWeight: 700, color: 'var(--navy)' }}>💾 Save as {matchedBiz.name}'s rate</button>}
                     <b>{fmt.money(lineCents(c, v))}</b>
                   </div>
                 )}
@@ -498,9 +558,11 @@ function OrderDrawer({ orderId, onClose, facilityId, isHQ }) {
           <div className="cl-muted" style={{ fontSize: 13, marginTop: 6 }}>📍 {o.address?.line1}, {o.address?.postcode}</div>
           <div style={{ marginTop: 8 }}>Driver: <b>{o.driver?.name || 'Unassigned'}</b></div>
           <div style={{ marginTop: 4 }}>Warehouse: <b>{o.facility?.name || 'Unrouted'}</b>{o.facility ? <span className="cl-muted"> · {o.facility.line1}, {o.facility.postcode}</span> : null}</div>
-          <div className="cl-row" style={{ gap: 8, marginTop: 12 }}>
-            <Button sm variant="ghost" onClick={() => printInvoice(o)}>🧾 Generate invoice</Button>
-          </div>
+          {isHQ && (
+            <div className="cl-row" style={{ gap: 8, marginTop: 12 }}>
+              <Button sm variant="ghost" onClick={() => printInvoice(o)}>🧾 Generate invoice</Button>
+            </div>
+          )}
         </div>
 
         {/* inter-warehouse transfer */}
@@ -616,6 +678,10 @@ function FacilityBoard({ order, onReload }) {
   const advG = async (gid) => { await api.post(`/api/garments/${gid}/advance`, { actor: 'ops' }); onReload(); };
   const addG = async () => { await api.post(`/api/orders/${order.id}/garments`, { ...form, weight_kg: form.weight_kg ? Number(form.weight_kg) : null }); setForm({ type: '', color: '', weight_kg: '', care: '' }); setAdding(false); onReload(); };
   const advanceOrder = async (s) => { await api.post(`/api/orders/${order.id}/status`, { status: s }); onReload(); };
+  const setActualWeight = async (itemId, kg) => { await api.post(`/api/order_items/${itemId}/weight`, { actual_weight_kg: kg }); onReload(); };
+  const setActualBags = async (itemId, qty) => { await api.post(`/api/order_items/${itemId}/actual-qty`, { actual_qty: qty }); onReload(); };
+  const loadWashItems = (order.items || []).filter((it) => it.catalog_unit === 'per_kg');
+  const bagItems = (order.items || []).filter((it) => it.catalog_unit === 'per_bag');
 
   return (
     <div className="cl-card">
@@ -629,6 +695,20 @@ function FacilityBoard({ order, onReload }) {
           <Button sm variant="ghost" onClick={() => setAdding((x) => !x)}>+ Intake</Button>
         </div>
       </div>
+
+      {loadWashItems.length > 0 && (
+        <div className="cl-card" style={{ background: 'var(--light)', marginBottom: 14 }}>
+          <div className="cl-eyebrow" style={{ marginBottom: 10 }}>🧺 Load wash — weigh & record actual total</div>
+          {loadWashItems.map((it) => <LoadWashRow key={it.id} item={it} onSave={setActualWeight} />)}
+        </div>
+      )}
+
+      {bagItems.length > 0 && (
+        <div className="cl-card" style={{ background: 'var(--light)', marginBottom: 14 }}>
+          <div className="cl-eyebrow" style={{ marginBottom: 10 }}>🛍️ By the bag — record bags received & cleaned</div>
+          {bagItems.map((it) => <BagCountRow key={it.id} item={it} onSave={setActualBags} />)}
+        </div>
+      )}
 
       {adding && <div className="cl-card" style={{ background: 'var(--light)', marginBottom: 14 }}>
         <div className="cl-eyebrow" style={{ marginBottom: 8 }}>Check in & tag a garment</div>
@@ -669,6 +749,44 @@ function FacilityBoard({ order, onReload }) {
         </table>}
 
       {labelsFor && <QrLabels order={labelsFor} onClose={() => setLabelsFor(null)} />}
+    </div>
+  );
+}
+
+// one load-wash line (per-kg): capture the facility's actual weighed total, separate from per-garment QR tagging
+function LoadWashRow({ item, onSave }) {
+  const [val, setVal] = useState(item.actual_weight_kg ?? '');
+  useEffect(() => { setVal(item.actual_weight_kg ?? ''); }, [item.actual_weight_kg]);
+  return (
+    <div className="cl-between" style={{ padding: '8px 0', borderBottom: '1px solid var(--gray3)' }}>
+      <div>
+        <b>{item.name}</b>
+        <div className="cl-muted" style={{ fontSize: 12 }}>Customer estimate: {item.weight_kg ?? '—'}kg</div>
+      </div>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <input className="cl-field" type="number" step="0.1" placeholder="Actual kg" style={{ width: 90 }} value={val} onChange={(e) => setVal(e.target.value)} />
+        <Button sm variant="lime" disabled={val === ''} onClick={() => onSave(item.id, Number(val))}>Save</Button>
+        {item.actual_weight_kg != null && <Chip variant="navy">✓ {item.actual_weight_kg}kg</Chip>}
+      </div>
+    </div>
+  );
+}
+
+// one by-the-bag line (B2B towels): capture bags actually received & cleaned, separate from per-garment QR tagging
+function BagCountRow({ item, onSave }) {
+  const [val, setVal] = useState(item.actual_qty ?? '');
+  useEffect(() => { setVal(item.actual_qty ?? ''); }, [item.actual_qty]);
+  return (
+    <div className="cl-between" style={{ padding: '8px 0', borderBottom: '1px solid var(--gray3)' }}>
+      <div>
+        <b>{item.name}</b>
+        <div className="cl-muted" style={{ fontSize: 12 }}>Client estimate: {item.qty ?? '—'} bag(s)</div>
+      </div>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <input className="cl-field" type="number" step="1" placeholder="Actual bags" style={{ width: 90 }} value={val} onChange={(e) => setVal(e.target.value)} />
+        <Button sm variant="lime" disabled={val === ''} onClick={() => onSave(item.id, Math.round(Number(val)))}>Save</Button>
+        {item.actual_qty != null && <Chip variant="navy">✓ {item.actual_qty} bag(s)</Chip>}
+      </div>
     </div>
   );
 }
@@ -761,8 +879,9 @@ function QrLabels({ order, onClose }) {
 function Drivers() {
   const [drivers, setDrivers] = useState([]);
   const [creditFor, setCreditFor] = useState(null);
+  const [historyFor, setHistoryFor] = useState(null);
   const [adding, setAdding] = useState(false);
-  const [form, setForm] = useState({ name: '', phone: '', email: '' });
+  const [form, setForm] = useState({ name: '', phone: '', email: '', password: '' });
   const [busy, setBusy] = useState(false);
   const [importing, setImporting] = useState(false);
   const load = useCallback(() => api.get('/api/ops/drivers').then(setDrivers), []);
@@ -773,7 +892,7 @@ function Drivers() {
     if (!form.name.trim()) return;
     setBusy(true);
     await api.post('/api/ops/drivers', form);
-    setBusy(false); setAdding(false); setForm({ name: '', phone: '', email: '' }); load();
+    setBusy(false); setAdding(false); setForm({ name: '', phone: '', email: '', password: '' }); load();
   };
 
   const located = drivers.filter((d) => d.location).map((d) => ({ id: d.id, name: d.name, lat: d.location.lat, lng: d.location.lng }));
@@ -800,6 +919,7 @@ function Drivers() {
           <label style={{ flex: 1, minWidth: 160 }}><span className="cl-label">Name</span><input className="cl-field" placeholder="Driver name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
           <label style={{ flex: 1, minWidth: 140 }}><span className="cl-label">Phone</span><input className="cl-field" placeholder="9xxx xxxx" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></label>
           <label style={{ flex: 1, minWidth: 180 }}><span className="cl-label">Email</span><input className="cl-field" placeholder="name@chaselaundry.com" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></label>
+          <label style={{ flex: 1, minWidth: 160 }}><span className="cl-label">Login password</span><input className="cl-field" type="text" placeholder='default: "password"' value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></label>
           <Button variant="lime" disabled={busy || !form.name.trim()} onClick={addDriver}>{busy ? 'Adding…' : 'Add to fleet'}</Button>
         </div>
       )}
@@ -830,8 +950,44 @@ function Drivers() {
             {d.location && <div className="cl-between" style={{ fontSize: 13, marginTop: 6 }}>
               <span className="cl-muted">Last ping</span><b>{fmt.ago(d.location.ts)}</b>
             </div>}
+            <Button sm variant="ghost" style={{ marginTop: 10, width: '100%' }} onClick={() => setHistoryFor(d)}>📋 Last 30 days</Button>
           </div>
         ))}
+      </div>
+      {historyFor && <DriverHistoryDrawer driver={historyFor} onClose={() => setHistoryFor(null)} />}
+    </>
+  );
+}
+
+// last 30 days of a driver's jobs — spot patterns / complaints before they escalate
+function DriverHistoryDrawer({ driver, onClose }) {
+  const [jobs, setJobs] = useState(null);
+  useEffect(() => { api.get(`/api/drivers/${driver.id}/history?days=30`).then(setJobs); }, [driver.id]);
+  return (
+    <>
+      <div className="backdrop" onClick={onClose} />
+      <div className="drawer">
+        <div className="cl-between" style={{ marginBottom: 16 }}>
+          <div className="cl-row" style={{ gap: 12 }}><Avatar name={driver.name} size={44} /><div><div style={{ fontWeight: 900, fontSize: 20 }}>{driver.name}</div><div className="cl-muted" style={{ fontSize: 13 }}>Last 30 days</div></div></div>
+          <button onClick={onClose} style={{ fontSize: 22 }}>✕</button>
+        </div>
+        {jobs === null ? <Empty icon="🚚" title="Loading…" />
+          : jobs.length === 0 ? <Empty icon="📦" title="No jobs in the last 30 days" />
+          : jobs.map((o) => (
+            <div key={o.id} className="cl-card" style={{ marginBottom: 8 }}>
+              <div className="cl-between"><b>{o.code}</b><StatusPill status={o.status} label={o.status_label} /></div>
+              <div className="cl-between" style={{ marginTop: 6 }}>
+                <span className="cl-muted" style={{ fontSize: 13 }}>{fmt.date(o.created_at)} · {o.customer?.name}</span>
+                <b>{fmt.money(o.total_cents)}</b>
+              </div>
+              {o.review && (
+                <div style={{ marginTop: 6, fontSize: 13 }}>
+                  <span>{'⭐'.repeat(o.review.rating || 0)}</span>
+                  {o.review.comment && <span className="cl-muted" style={{ marginLeft: 6, fontStyle: 'italic' }}>"{o.review.comment}"</span>}
+                </div>
+              )}
+            </div>
+          ))}
       </div>
     </>
   );
@@ -1177,6 +1333,8 @@ function CustomerDrawer({ client: initial, isBiz, onClose, onInvoice }) {
           )}
         </div>
 
+        {isBiz && <BusinessRatesCard businessId={client.id} />}
+
         <div className="cl-between" style={{ marginBottom: 10 }}>
           <div className="cl-eyebrow">Orders ({orders.length})</div>
           <Button sm variant="lime" onClick={() => { onClose(); onInvoice(client); }}>🧾 New invoice</Button>
@@ -1192,6 +1350,37 @@ function CustomerDrawer({ client: initial, isBiz, onClose, onInvoice }) {
         ))}
       </div>
     </>
+  );
+}
+
+// negotiated B2B contract pricing for one business client — set once here, or from the New order form
+function BusinessRatesCard({ businessId }) {
+  const [rows, setRows] = useState([]);
+  const [edits, setEdits] = useState({});
+  const load = useCallback(() => api.get(`/api/ops/business/${businessId}/rates`).then(setRows), [businessId]);
+  useEffect(() => { load(); }, [load]);
+  const unitLabel = (u) => (u === 'per_kg' ? 'kg' : u === 'per_bag' ? 'bag' : 'item');
+  const save = async (catalogId, dollars) => { await api.post(`/api/ops/business/${businessId}/rates`, { catalog_id: catalogId, price_cents: Math.round((parseFloat(dollars) || 0) * 100) }); load(); };
+  const reset = async (catalogId) => { await api.post(`/api/ops/business/${businessId}/rates`, { catalog_id: catalogId, price_cents: null }); load(); };
+
+  return (
+    <div className="cl-card" style={{ marginBottom: 14 }}>
+      <div className="cl-eyebrow" style={{ marginBottom: 10 }}>Negotiated pricing</div>
+      {rows.map((r) => {
+        const val = edits[r.id] ?? (r.rate_cents / 100);
+        return (
+          <div key={r.id} className="cl-between" style={{ padding: '6px 0', borderBottom: '1px solid var(--gray3)' }}>
+            <span style={{ fontSize: 13 }}>{r.icon} {r.name}</span>
+            <div className="cl-row" style={{ gap: 8 }}>
+              <input className="cl-field" style={{ width: 80, padding: '5px 8px' }} value={val} onChange={(e) => setEdits((s) => ({ ...s, [r.id]: e.target.value }))} />
+              <span className="cl-muted" style={{ fontSize: 11 }}>/{unitLabel(r.unit)}</span>
+              <Button sm variant="ghost" onClick={() => save(r.id, val)}>Save</Button>
+              {r.has_override && <button onClick={() => reset(r.id)} title="Reset to default price" style={{ fontSize: 11, color: 'var(--gray)' }}>↺</button>}
+            </div>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -1690,11 +1879,16 @@ function InvoicingDashboard({ facilityId, isHQ }) {
                   <td style={{ fontWeight: 700 }}>{fmt.money(o.payout_total)}</td>
                   <td>
                     <div style={{ fontSize: 12, color: 'var(--gray)' }}>
-                      {o.items.map((it) => (
-                        <div key={it.id}>
-                          • {it.name}: {it.qty || it.weight_kg} {it.weight_kg ? 'kg' : 'pcs'} @ {fmt.money(it.cost_per_unit)} ({fmt.money(it.line_cost)})
-                        </div>
-                      ))}
+                      {o.items.map((it) => {
+                        const unitLabel = it.unit === 'per_kg' ? 'kg' : it.unit === 'per_bag' ? 'bag(s)' : 'pcs';
+                        const qty = it.unit === 'per_kg' ? (it.actual_weight_kg ?? it.weight_kg) : it.unit === 'per_bag' ? (it.actual_qty ?? it.qty) : it.qty;
+                        const isActual = it.actual_weight_kg != null || it.actual_qty != null;
+                        return (
+                          <div key={it.id}>
+                            • {it.name}: {qty} {unitLabel}{isActual ? ' (actual)' : ''} @ {fmt.money(it.cost_per_unit)} ({fmt.money(it.line_cost)})
+                          </div>
+                        );
+                      })}
                     </div>
                   </td>
                 </tr>

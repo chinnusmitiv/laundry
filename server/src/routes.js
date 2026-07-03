@@ -3,10 +3,11 @@ import { randomInt } from 'node:crypto';
 import { db, STATUS_FLOW, STATUS_LABEL, GARMENT_FLOW } from './db.js';
 import { payments, google, notify, stepToward, distanceKm } from './services.js';
 import { searchPlaces, searchOneMap } from './places.js';
+import { hashPassword } from './crypto.js';
 
 const now = () => new Date().toISOString();
 const id = (p) => `${p}_${nanoid(8)}`;
-const PLATFORM_FEE = 99; // flat platform fee in cents
+const SERVICE_FEE_CENTS = 399; // flat per-order service fee — waived for Chase Plus/Pro members
 const cardBrand = (digits) => (/^4/.test(digits) ? 'Visa' : /^5[1-5]/.test(digits) ? 'Mastercard' : /^3[47]/.test(digits) ? 'Amex' : 'Card');
 
 // ---- app settings (key/value JSON) ----
@@ -52,6 +53,14 @@ const activeSub = (uid) =>
               FROM subscriptions s JOIN plans p ON p.id = s.plan_id
               WHERE s.user_id = ? AND s.status = 'active'`).get(uid);
 
+// HQ-only actions (driver assignment, customer invoicing) are gated on the acting ops console's identity.
+// A warehouse console's ops user has a facility_id; HQ's does not.
+const isHQOps = (opsId) => {
+  if (!opsId) return false;
+  const u = db.prepare(`SELECT facility_id FROM users WHERE id = ? AND role = 'ops'`).get(opsId);
+  return !!u && u.facility_id == null;
+};
+
 function garmentEvents(gid) {
   return db.prepare('SELECT * FROM garment_events WHERE garment_id = ? ORDER BY ts').all(gid);
 }
@@ -63,7 +72,7 @@ function logGarmentEvent(gid, status, actor = 'ops', note = null) {
 function fullOrder(oid) {
   const o = db.prepare('SELECT * FROM orders WHERE id = ?').get(oid);
   if (!o) return null;
-  o.items = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(oid);
+  o.items = db.prepare('SELECT oi.*, c.unit AS catalog_unit FROM order_items oi LEFT JOIN catalog c ON c.id = oi.catalog_id WHERE oi.order_id = ?').all(oid);
   o.garments = db.prepare('SELECT * FROM garments WHERE order_id = ? ORDER BY tag_code').all(oid);
   for (const g of o.garments) g.events = garmentEvents(g.id);
   o.customer = getUser(o.customer_id);
@@ -104,7 +113,27 @@ export function registerRoutes(app, io) {
     res.json(rows.map((u) => { delete u.password_hash; return u; }));
   });
   app.get('/api/users/:id', (req, res) => res.json(getUser(req.params.id) || {}));
-  app.get('/api/catalog', (_req, res) => res.json(db.prepare('SELECT * FROM catalog ORDER BY category, name').all()));
+  // consumer apps never pass ?scope, so they only ever see the fixed B2C catalog; ops passes scope=b2b for corporate orders
+  app.get('/api/catalog', (req, res) => res.json(db.prepare('SELECT * FROM catalog WHERE scope = ? ORDER BY category, name').all(req.query.scope || 'b2c')));
+
+  // per-client negotiated B2B rates (falls back to the b2b catalog's default price when no override exists)
+  app.get('/api/ops/business/:id/rates', (req, res) => {
+    const catalog = db.prepare(`SELECT * FROM catalog WHERE scope = 'b2b' ORDER BY category, name`).all();
+    const overrides = db.prepare('SELECT catalog_id, price_cents FROM business_rates WHERE business_id = ?').all(req.params.id);
+    const byId = Object.fromEntries(overrides.map((o) => [o.catalog_id, o.price_cents]));
+    res.json(catalog.map((c) => ({ ...c, rate_cents: byId[c.id] ?? c.price_cents, has_override: byId[c.id] != null })));
+  });
+  app.post('/api/ops/business/:id/rates', (req, res) => {
+    const { catalog_id, price_cents } = req.body;
+    if (price_cents == null || price_cents === '') {
+      db.prepare('DELETE FROM business_rates WHERE business_id = ? AND catalog_id = ?').run(req.params.id, catalog_id);
+    } else {
+      db.prepare(`INSERT INTO business_rates (business_id, catalog_id, price_cents) VALUES (?,?,?)
+                  ON CONFLICT(business_id, catalog_id) DO UPDATE SET price_cents = excluded.price_cents`)
+        .run(req.params.id, catalog_id, Math.round(Number(price_cents)));
+    }
+    res.json({ ok: true });
+  });
 
   // warehouses
   app.get('/api/facilities', (_req, res) => res.json(db.prepare('SELECT * FROM facilities WHERE active = 1 ORDER BY name').all()));
@@ -209,7 +238,7 @@ export function registerRoutes(app, io) {
 
   // create order — consumer (app) OR B2B (warehouse, invoiced, no app account)
   app.post('/api/orders', (req, res) => {
-    let { customer_id, address_id, items = [], pickup_slot, return_slot, notes, use_credit, handover, handover_contact, facility_id, driver_id, business_name, business_phone } = req.body;
+    let { customer_id, address_id, items = [], pickup_slot, return_slot, notes, use_credit, handover, handover_contact, facility_id, driver_id, business_name, business_phone, repeat_requested, repeat_cadence } = req.body;
 
     // B2B: no customer account — find-or-create a lightweight business client (role='business', no login)
     const isB2B = !!(business_name && business_name.trim());
@@ -241,11 +270,11 @@ export function registerRoutes(app, io) {
     const status = driver_id ? 'assigned' : (isB2B && facility_id ? 'at_facility' : 'placed');
     const paymentStatus = isB2B ? 'invoiced' : 'pending'; // B2B billed on terms, not pay-now
     db.prepare(`INSERT INTO orders (id,code,customer_id,address_id,driver_id,facility_id,status,pickup_slot,return_slot,notes,handover,handover_contact,
-        subtotal_cents,platform_fee_cents,delivery_fee_cents,discount_cents,credit_applied_cents,total_cents,payment_status,created_at,updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, ?, ?, ?)`)
+        subtotal_cents,platform_fee_cents,delivery_fee_cents,discount_cents,credit_applied_cents,total_cents,payment_status,repeat_requested,repeat_cadence,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, ?, ?, ?, ?, ?)`)
       .run(oid, code, customer_id, address_id ?? null, driver_id ?? null, facility_id ?? null, status, pickup_slot ?? null, return_slot ?? null, notes || '', handover ?? null, handover_contact ?? null,
         pricing.subtotal_cents, pricing.platform_fee_cents, pricing.delivery_fee_cents,
-        pricing.discount_cents, pricing.credit_applied_cents, pricing.total_cents, paymentStatus, now(), now());
+        pricing.discount_cents, pricing.credit_applied_cents, pricing.total_cents, paymentStatus, repeat_requested ? 1 : 0, repeat_requested ? (repeat_cadence || 'weekly') : null, now(), now());
     if (driver_id) io.to(`user:${driver_id}`).emit('job:assigned', fullOrder(oid));
     for (const it of items) {
       const cat = db.prepare('SELECT * FROM catalog WHERE id = ?').get(it.catalog_id);
@@ -612,20 +641,35 @@ export function registerRoutes(app, io) {
     }; }));
   });
 
+  // recent jobs for one driver — lets HQ spot patterns/complaints (default: last 30 days)
+  app.get('/api/drivers/:id/history', (req, res) => {
+    const days = Math.max(1, parseInt(req.query.days, 10) || 30);
+    const since = new Date(Date.now() - days * 864e5).toISOString();
+    const rows = db.prepare(`SELECT * FROM orders WHERE driver_id = ? AND created_at >= ? ORDER BY created_at DESC`).all(req.params.id, since);
+    res.json(rows.map((o) => ({
+      id: o.id, code: o.code, status: o.status, status_label: STATUS_LABEL[o.status] || o.status,
+      total_cents: o.total_cents, created_at: o.created_at,
+      customer: getUser(o.customer_id),
+      review: db.prepare('SELECT rating, comment FROM reviews WHERE order_id = ?').get(o.id) || null,
+    })));
+  });
+
   // HQ adds a new driver to the fleet
   app.post('/api/ops/drivers', (req, res) => {
     const name = String(req.body.name || '').trim();
     if (!name) return res.status(400).json({ error: 'Driver name is required.' });
     const avatar = name.split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
     const uid = id('drv');
-    db.prepare('INSERT INTO users (id,role,name,email,phone,avatar,facility_id,created_at) VALUES (?,?,?,?,?,?,?,?)')
-      .run(uid, 'driver', name, String(req.body.email || '').trim() || null, String(req.body.phone || '').trim() || null, avatar, null, now());
+    db.prepare('INSERT INTO users (id,role,name,email,phone,avatar,facility_id,password_hash,created_at) VALUES (?,?,?,?,?,?,?,?,?)')
+      .run(uid, 'driver', name, String(req.body.email || '').trim() || null, String(req.body.phone || '').trim() || null, avatar, null,
+        hashPassword(String(req.body.password || '').trim() || 'password'), now());
     const driver = getUser(uid);
     io.to('role:ops').emit('driver:shift', { driver_id: uid }); // nudge ops lists to refresh
     res.json(driver);
   });
 
   app.post('/api/orders/:id/assign', (req, res) => {
+    if (!isHQOps(req.body.ops_id)) return res.status(403).json({ error: 'Only HQ can assign drivers.' });
     const o = db.prepare('SELECT * FROM orders WHERE id = ?').get(req.params.id);
     if (!o) return res.status(404).json({ error: 'not found' });
     db.prepare('UPDATE orders SET driver_id = ?, status = ?, updated_at = ? WHERE id = ?')
@@ -711,6 +755,24 @@ export function registerRoutes(app, io) {
     broadcastOrder(io, o.id);
     io.to(`order:${o.id}`).emit('garment:updated', { ...g, events: garmentEvents(g.id) });
     res.json(g);
+  });
+
+  // load wash (per-kg lines): facility records the actual weighed total — drives facility payout, distinct from the customer's checkout estimate
+  app.post('/api/order_items/:id/weight', (req, res) => {
+    const item = db.prepare('SELECT * FROM order_items WHERE id = ?').get(req.params.id);
+    if (!item) return res.status(404).json({ error: 'not found' });
+    const actual = Math.max(0, Number(req.body.actual_weight_kg) || 0);
+    db.prepare('UPDATE order_items SET actual_weight_kg = ? WHERE id = ?').run(actual, item.id);
+    res.json(broadcastOrder(io, item.order_id));
+  });
+
+  // by-the-bag B2B lines (gym/salon/massage towels): facility records bags actually received & cleaned
+  app.post('/api/order_items/:id/actual-qty', (req, res) => {
+    const item = db.prepare('SELECT * FROM order_items WHERE id = ?').get(req.params.id);
+    if (!item) return res.status(404).json({ error: 'not found' });
+    const actual = Math.max(0, parseInt(req.body.actual_qty, 10) || 0);
+    db.prepare('UPDATE order_items SET actual_qty = ? WHERE id = ?').run(actual, item.id);
+    res.json(broadcastOrder(io, item.order_id));
   });
 
   // generate a printable tag per item (used by HQ/driver to print & scan)
@@ -883,7 +945,11 @@ export function registerRoutes(app, io) {
           let lineCost = 0;
           if (cat) {
             if (cat.unit === 'per_kg') {
-              lineCost = Math.round(costPerUnit * (it.weight_kg || 0));
+              // load wash: the facility's actual weighed total (once recorded) drives payout, not the customer's checkout estimate
+              lineCost = Math.round(costPerUnit * (it.actual_weight_kg ?? it.weight_kg ?? 0));
+            } else if (cat.unit === 'per_bag') {
+              // by-the-bag B2B towels: the facility's actual bag count (once recorded) drives payout
+              lineCost = costPerUnit * (it.actual_qty ?? it.qty ?? 1);
             } else {
               lineCost = costPerUnit * (it.qty || 1);
             }
@@ -891,6 +957,7 @@ export function registerRoutes(app, io) {
           orderCost += lineCost;
           itemsList.push({
             ...it,
+            unit: cat?.unit || null,
             cost_per_unit: costPerUnit,
             line_cost: lineCost,
           });
@@ -997,9 +1064,10 @@ function priceOrder({ customer_id, items = [], use_credit = false, b2b = false }
     return { subtotal_cents: subtotal, platform_fee_cents: 0, delivery_fee_cents: 0, discount_cents: 0, credit_applied_cents: 0, total_cents: subtotal, plan: 'B2B' };
   }
   const sub = customer_id ? activeSub(customer_id) : null;
-  const discount = sub ? Math.round((subtotal * sub.discount_pct) / 100) : 0;
+  // Chase Plus/Pro waive the flat service fee (no more % discount) + get free delivery
+  const serviceFee = sub ? 0 : SERVICE_FEE_CENTS;
   const delivery = sub && sub.free_delivery ? 0 : 250;
-  let total = subtotal + PLATFORM_FEE + delivery - discount;
+  let total = subtotal + serviceFee + delivery;
   let creditApplied = 0;
   if (use_credit && customer_id) {
     const bal = balanceOf(customer_id);
@@ -1008,9 +1076,9 @@ function priceOrder({ customer_id, items = [], use_credit = false, b2b = false }
   }
   return {
     subtotal_cents: subtotal,
-    platform_fee_cents: PLATFORM_FEE,
+    platform_fee_cents: serviceFee,
     delivery_fee_cents: delivery,
-    discount_cents: discount,
+    discount_cents: 0,
     credit_applied_cents: creditApplied,
     total_cents: Math.max(0, total),
     plan: sub ? sub.plan_name : 'Lite',

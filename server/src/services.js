@@ -1,12 +1,34 @@
 // ──────────────────────────────────────────────────────────────
-// Mock external integrations. Everything here is simulated for the
+// Mock external integrations. Most of this is simulated for the
 // POC — no real API keys. Each call logs a realistic "side effect"
 // so the demo can show that emails/charges/etc. would have fired.
+// Login OTP emails are the one exception: those go out for real via
+// Gmail SMTP, since a code that only appears in a server log isn't
+// usable as an actual login flow.
 // ──────────────────────────────────────────────────────────────
 import { nanoid } from 'nanoid';
+import nodemailer from 'nodemailer';
 import { db } from './db.js';
 
 const log = (svc, msg) => console.log(`  ⟶ [${svc}] ${msg}`);
+
+// --- real SMTP transport (Gmail), used only for login OTP emails ---
+const gmailUser = process.env.GMAIL_USER;
+const gmailPass = process.env.GMAIL_APP_PASSWORD;
+const mailer = gmailUser && gmailPass
+  ? nodemailer.createTransport({ service: 'gmail', auth: { user: gmailUser, pass: gmailPass } })
+  : null;
+
+if (!mailer) {
+  console.warn('⚠️  GMAIL_USER / GMAIL_APP_PASSWORD not set — login OTP emails will fail to send. See server/.env.example.');
+}
+
+// send a real email — used only for login OTP codes, not general notifications
+export async function sendRealEmail({ to, subject, body }) {
+  if (!mailer) throw new Error('Email is not configured on the server (missing GMAIL_USER / GMAIL_APP_PASSWORD).');
+  await mailer.sendMail({ from: `ChaseLaundry <${gmailUser}>`, to, subject, text: body });
+  log('email', `to ${to} — "${subject}" → sent (real)`);
+}
 
 // --- Payments (Stripe-shaped) ---
 export const payments = {
@@ -29,7 +51,7 @@ export const payments = {
   },
 };
 
-// --- Email (transactional) ---
+// --- Email (transactional) — mocked, like the rest of notify()'s side-effects ---
 export const email = {
   send({ to, subject, body }) {
     log('email', `to ${to} — "${subject}"`);

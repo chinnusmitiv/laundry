@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
-  api, fmt, getSocket, useSocket, STATUS_FLOW, STATUS_LABEL, GARMENT_LABEL, HANDOVER, ADDRESS_TYPES, TICKET_CATEGORIES,
+  api, fmt, getSocket, useSocket, STATUS_FLOW, STATUS_LABEL, GARMENT_LABEL, HANDOVER, ADDRESS_TYPES, TICKET_CATEGORIES, REPEAT_CADENCE, nextRepeatDue,
   Logo, Mark, Button, Card, Chip, Field, Avatar, StatusPill, TopBar, BottomNav, Sheet, Empty, OneMap, GarmentJourney, PlacesAutocomplete,
   PaymentSheet, TopUpSheet, topupBonus, distKm, printInvoice,
 } from '@shared';
@@ -91,7 +91,7 @@ function CustomerApp() {
 function AuthScreen({ onAuth }) {
   const [step, setStep] = useState('identify'); // identify | verify
   const [identifier, setIdentifier] = useState('');
-  const [sent, setSent] = useState(null); // { channel, sent_to, is_new, dev_code }
+  const [sent, setSent] = useState(null); // { sent_to, is_new }
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
@@ -101,7 +101,7 @@ function AuthScreen({ onAuth }) {
     setErr(''); setBusy(true);
     try {
       const res = await api.post('/api/auth/request-otp', { identifier });
-      setSent(res); setCode(res.dev_code || ''); setName(''); setStep('verify');
+      setSent(res); setCode(''); setName(''); setStep('verify');
     } catch (e) { setErr(e.message || 'Could not send code. Try again.'); }
     finally { setBusy(false); }
   };
@@ -116,7 +116,6 @@ function AuthScreen({ onAuth }) {
   };
 
   const reset = () => { setStep('identify'); setCode(''); setErr(''); setSent(null); };
-  const isPhone = /^[+\d][\d\s-]*$/.test(identifier.trim()) && !identifier.includes('@');
 
   return (
     <div className="cl-phone" style={{ background: 'var(--navy)' }}>
@@ -130,8 +129,8 @@ function AuthScreen({ onAuth }) {
 
         <div className="cl-card" style={{ padding: 20 }}>
           {step === 'identify' ? <>
-            <Field label="Email or phone number" type="text" inputMode="email" autoComplete="username"
-              placeholder="you@email.com  ·  9123 4567" value={identifier}
+            <Field label="Email address" type="email" autoComplete="username"
+              placeholder="you@email.com" value={identifier}
               onChange={(e) => setIdentifier(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && identifier.trim() && requestOtp()} />
 
@@ -141,7 +140,7 @@ function AuthScreen({ onAuth }) {
               {busy ? 'Sending code…' : 'Send code'}
             </Button>
             <div style={{ textAlign: 'center', fontSize: 12, color: 'var(--gray)', marginTop: 12 }}>
-              No password needed — we'll {isPhone ? 'text' : 'email'} you a one-time code.
+              No password needed — we'll email you a one-time code.
             </div>
           </> : <>
             <div style={{ fontSize: 13, color: 'var(--gray)', marginBottom: 14 }}>
@@ -160,12 +159,6 @@ function AuthScreen({ onAuth }) {
                 style={{ textAlign: 'center', fontSize: 26, fontWeight: 800, letterSpacing: '10px' }} />
             </label>
 
-            {sent?.dev_code && (
-              <div style={{ background: 'var(--lime-pale)', border: '1.5px dashed var(--lime-d)', color: 'var(--navy)', fontSize: 12, padding: '10px 12px', borderRadius: 10, marginBottom: 12 }}>
-                🔒 <b>Demo mode</b> — a real app would {sent.channel === 'phone' ? 'SMS' : 'email'} this. Your code: <b>{sent.dev_code}</b>
-              </div>
-            )}
-
             {err && <ErrBox>{err}</ErrBox>}
 
             <Button variant="lime" disabled={code.length !== 6 || (sent?.is_new && !name.trim()) || busy} onClick={verifyOtp}>
@@ -183,12 +176,6 @@ function AuthScreen({ onAuth }) {
             )}
           </>}
         </div>
-
-        {step === 'identify' && (
-          <button onClick={() => { setIdentifier('alex@example.com'); }} style={{ marginTop: 16, color: 'rgba(255,255,255,.6)', fontSize: 13, fontWeight: 600, textAlign: 'center', width: '100%' }}>
-            Use demo account →
-          </button>
-        )}
       </div>
     </div>
   );
@@ -220,7 +207,7 @@ function Home({ summary, orders, onOpenOrder, onOrder, onTab }) {
         <Card style={{ flex: 1, background: 'var(--lime)', color: 'var(--navy)' }}>
           <div className="cl-eyebrow" style={{ color: 'rgba(29,41,81,.45)' }}>Plan</div>
           <div style={{ fontSize: 24, fontWeight: 900, marginTop: 6 }}>{summary.subscription?.plan_name || 'Lite'}</div>
-          <div style={{ fontSize: 11, fontWeight: 700, marginTop: 2 }}>{summary.subscription ? `${summary.subscription.discount_pct}% off · free delivery` : 'pay as you go'}</div>
+          <div style={{ fontSize: 11, fontWeight: 700, marginTop: 2 }}>{summary.subscription ? 'No service fee · free delivery' : 'pay as you go'}</div>
         </Card>
       </div>
 
@@ -276,12 +263,22 @@ function OrderRow({ o, onClick }) {
 
 // ─────────────────────────────────────── ORDERS
 function Orders({ orders, onOpenOrder, onOrder }) {
+  const due = orders[0] && nextRepeatDue(orders[0]);
+  const dueNow = due && due <= new Date();
   return (
     <div style={{ padding: 18 }}>
       <div className="cl-between" style={{ marginBottom: 14 }}>
         <div style={{ fontSize: 22, fontWeight: 900 }}>Your orders</div>
         <Button sm variant="lime" onClick={onOrder}>+ New</Button>
       </div>
+      {dueNow && (
+        <Card style={{ marginBottom: 14, background: 'var(--navy)', color: '#fff' }} onClick={onOrder}>
+          <div className="cl-between">
+            <div><b>🔁 Time for your {REPEAT_CADENCE[orders[0].repeat_cadence]?.label.toLowerCase() || 'repeat'} order</b><div className="cl-muted" style={{ fontSize: 12, color: 'rgba(255,255,255,.6)' }}>Same as last time — schedule your next pickup?</div></div>
+            <Button sm variant="lime" onClick={onOrder}>Schedule</Button>
+          </div>
+        </Card>
+      )}
       {orders.length === 0 ? <Empty icon="📦" title="No orders yet leh" sub="Schedule your first pickup, confirm shiok" /> :
         orders.map((o) => (
           <Card key={o.id} onClick={() => onOpenOrder(o.id)} style={{ marginBottom: 10, cursor: 'pointer' }}>
@@ -393,7 +390,7 @@ function OrderDetail({ orderId, onClose }) {
           {o.items.map((i) => <Line key={i.id} l={i.name + (i.weight_kg ? ` (${i.weight_kg}kg)` : i.qty > 1 ? ` ×${i.qty}` : '')} v={fmt.money(i.price_cents)} />)}
           <div className="cl-divider" />
           <Line l="Subtotal" v={fmt.money(o.subtotal_cents)} />
-          <Line l="Platform fee" v={fmt.money(o.platform_fee_cents)} />
+          <Line l="Service fee" v={o.platform_fee_cents ? fmt.money(o.platform_fee_cents) : 'WAIVED'} />
           <Line l="Delivery" v={o.delivery_fee_cents ? fmt.money(o.delivery_fee_cents) : 'FREE'} />
           {o.discount_cents > 0 && <Line l="Plan discount" v={`– ${fmt.money(o.discount_cents)}`} green />}
           {o.credit_applied_cents > 0 && <Line l="Wallet credit" v={`– ${fmt.money(o.credit_applied_cents)}`} green />}
@@ -490,10 +487,12 @@ function OrderFlow({ open, onClose, onPlaced, summary }) {
   const [notes, setNotes] = useState('');
   const [handover, setHandover] = useState('hand_to_me');
   const [handoverContact, setHandoverContact] = useState('');
+  const [repeat, setRepeat] = useState(false);
+  const [repeatCadence, setRepeatCadence] = useState('weekly');
 
   useEffect(() => {
     if (open) {
-      api.get('/api/catalog').then(setCatalog); setStep(1); setCart({}); setAdding(false); setNotes(''); setHandover('hand_to_me'); setHandoverContact('');
+      api.get('/api/catalog').then(setCatalog); setStep(1); setCart({}); setAdding(false); setNotes(''); setHandover('hand_to_me'); setHandoverContact(''); setRepeat(false); setRepeatCadence('weekly');
       const addrs = summary?.addresses || [];
       setAddresses(addrs); setAddrId((addrs.find((a) => a.is_default) || addrs[0])?.id || null);
     }
@@ -514,6 +513,7 @@ function OrderFlow({ open, onClose, onPlaced, summary }) {
       customer_id: summary.user.id, address_id: addrId, items,
       pickup_slot: slot, return_slot: 'Thu · 18:00–20:00', use_credit: useCredit, notes,
       handover, handover_contact: handover === 'someone_else' ? handoverContact : null,
+      repeat_requested: repeat, repeat_cadence: repeat ? repeatCadence : null,
     });
     setPlacing(false); onPlaced(o);
   };
@@ -590,9 +590,8 @@ function OrderFlow({ open, onClose, onPlaced, summary }) {
           <Card style={{ marginBottom: 14 }}>
             <div className="cl-eyebrow" style={{ marginBottom: 10 }}>Order summary</div>
             <Line l="Subtotal" v={fmt.money(quote.subtotal_cents)} />
-            <Line l="Platform fee" v={fmt.money(quote.platform_fee_cents)} />
+            <Line l="Service fee" v={quote.platform_fee_cents ? fmt.money(quote.platform_fee_cents) : 'WAIVED'} />
             <Line l="Delivery" v={quote.delivery_fee_cents ? fmt.money(quote.delivery_fee_cents) : 'FREE'} />
-            {quote.discount_cents > 0 && <Line l={`${summary?.subscription?.plan_name} discount`} v={`– ${fmt.money(quote.discount_cents)}`} green />}
             {quote.credit_applied_cents > 0 && <Line l="Wallet credit" v={`– ${fmt.money(quote.credit_applied_cents)}`} green />}
             <div className="cl-divider" />
             <Line l={<b>Total today</b>} v={<b>{fmt.money(quote.total_cents)}</b>} />
@@ -602,6 +601,20 @@ function OrderFlow({ open, onClose, onPlaced, summary }) {
               <span style={{ width: 44, height: 26, borderRadius: 999, background: useCredit ? 'var(--lime)' : 'var(--gray3)', position: 'relative', transition: '.2s' }}>
                 <span style={{ position: 'absolute', top: 3, left: useCredit ? 21 : 3, width: 20, height: 20, borderRadius: 20, background: '#fff', transition: '.2s' }} /></span>
             </div>
+          </Card>
+          <Card style={{ marginBottom: 14 }}>
+            <div className="cl-between" onClick={() => setRepeat((x) => !x)} style={{ cursor: 'pointer' }}>
+              <span style={{ fontWeight: 700 }}>🔁 Repeat this order</span>
+              <span style={{ width: 44, height: 26, borderRadius: 999, background: repeat ? 'var(--lime)' : 'var(--gray3)', position: 'relative', transition: '.2s' }}>
+                <span style={{ position: 'absolute', top: 3, left: repeat ? 21 : 3, width: 20, height: 20, borderRadius: 20, background: '#fff', transition: '.2s' }} /></span>
+            </div>
+            {repeat && (
+              <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                {Object.entries(REPEAT_CADENCE).map(([k, c]) => (
+                  <Button key={k} sm variant={repeatCadence === k ? 'lime' : 'ghost'} onClick={() => setRepeatCadence(k)} style={{ flex: 1 }}>{c.label}</Button>
+                ))}
+              </div>
+            )}
           </Card>
           <div style={{ display: 'flex', gap: 10 }}>
             <Button variant="ghost" onClick={() => setStep(2)}>Back</Button>

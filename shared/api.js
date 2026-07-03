@@ -129,7 +129,7 @@ export async function printInvoice(order) {
     ty += bold ? 22 : 16;
   };
   if (o.subtotal_cents != null) row('Subtotal', m(o.subtotal_cents));
-  if (o.platform_fee_cents) row('Platform fee', m(o.platform_fee_cents));
+  if (o.platform_fee_cents) row('Service fee', m(o.platform_fee_cents));
   if (o.delivery_fee_cents) row('Delivery', m(o.delivery_fee_cents));
   if (o.discount_cents > 0) row('Discount', '- ' + m(o.discount_cents));
   if (o.credit_applied_cents > 0) row('Wallet credit', '- ' + m(o.credit_applied_cents));
@@ -210,6 +210,20 @@ export const HANDOVER = {
 };
 
 export const GARMENT_FLOW = ['checked_in', 'washing', 'drying', 'ironing', 'qc', 'packed', 'returned'];
+
+// repeat-order cadence options (shared across customer / web)
+export const REPEAT_CADENCE = {
+  weekly: { label: 'Every week', days: 7 },
+  biweekly: { label: 'Every 2 weeks', days: 14 },
+  monthly: { label: 'Every month', days: 30 },
+};
+
+// given an order's created_at + its repeat preference, when is the next one due?
+export function nextRepeatDue(order) {
+  if (!order?.repeat_requested || !order?.repeat_cadence) return null;
+  const days = REPEAT_CADENCE[order.repeat_cadence]?.days || 7;
+  return new Date(new Date(order.created_at).getTime() + days * 864e5);
+}
 export const GARMENT_LABEL = {
   checked_in: 'Checked in', washing: 'Washing', drying: 'Drying', ironing: 'Ironing',
   qc: 'Quality check', packed: 'Packed', returned: 'Returned',

@@ -49,11 +49,20 @@ export function initSchema() {
   CREATE TABLE IF NOT EXISTS catalog (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
-    category TEXT NOT NULL,        -- wash_fold | dry_clean | ironing | bedding | specialty
-    unit TEXT NOT NULL,           -- per_kg | per_item
+    category TEXT NOT NULL,        -- wash_fold | dry_clean | ironing | bedding | specialty | linens | towels
+    unit TEXT NOT NULL,           -- per_kg | per_item | per_bag
     price_cents INTEGER NOT NULL,
     icon TEXT,
-    eta_hours INTEGER DEFAULT 24
+    eta_hours INTEGER DEFAULT 24,
+    scope TEXT NOT NULL DEFAULT 'b2c'  -- b2c (consumer catalog) | b2b (corporate: linens/towels)
+  );
+
+  -- per-client negotiated B2B rates — overrides the b2b catalog's default price_cents for a specific business
+  CREATE TABLE IF NOT EXISTS business_rates (
+    business_id TEXT NOT NULL REFERENCES users(id),
+    catalog_id TEXT NOT NULL REFERENCES catalog(id),
+    price_cents INTEGER NOT NULL,
+    PRIMARY KEY (business_id, catalog_id)
   );
 
   -- subscription plans
@@ -239,6 +248,30 @@ export function initSchema() {
 
   migrateAuth();
   migrateOrders();
+  migrateRepeatOrders();
+  migrateLoadWash();
+  migrateB2B();
+}
+
+// Add repeat-order preference to orders (idempotent).
+function migrateRepeatOrders() {
+  const cols = db.prepare('PRAGMA table_info(orders)').all().map((c) => c.name);
+  if (!cols.includes('repeat_requested')) db.exec('ALTER TABLE orders ADD COLUMN repeat_requested INTEGER DEFAULT 0');
+  if (!cols.includes('repeat_cadence')) db.exec('ALTER TABLE orders ADD COLUMN repeat_cadence TEXT'); // weekly | biweekly | monthly
+}
+
+// Load wash (per_kg lines): the facility's actual weighed total, distinct from the customer's estimate (idempotent).
+function migrateLoadWash() {
+  const cols = db.prepare('PRAGMA table_info(order_items)').all().map((c) => c.name);
+  if (!cols.includes('actual_weight_kg')) db.exec('ALTER TABLE order_items ADD COLUMN actual_weight_kg REAL');
+}
+
+// B2B catalog scope + by-the-bag reconciliation (idempotent).
+function migrateB2B() {
+  const catCols = db.prepare('PRAGMA table_info(catalog)').all().map((c) => c.name);
+  if (!catCols.includes('scope')) db.exec("ALTER TABLE catalog ADD COLUMN scope TEXT NOT NULL DEFAULT 'b2c'");
+  const itemCols = db.prepare('PRAGMA table_info(order_items)').all().map((c) => c.name);
+  if (!itemCols.includes('actual_qty')) db.exec('ALTER TABLE order_items ADD COLUMN actual_qty INTEGER');
 }
 
 // Add pickup handover instructions to orders (idempotent).

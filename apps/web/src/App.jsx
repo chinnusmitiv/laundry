@@ -59,6 +59,7 @@ function NavBar() {
         <div className="nav-links">
           <a onClick={() => jump('how')}>How it works</a>
           <a onClick={() => jump('services')}>Services</a>
+          <a onClick={() => jump('areas')}>Areas</a>
           <a onClick={() => jump('pricing')}>Pricing</a>
           {auth ? <>
             <Link to="/account">{auth.name?.split(' ')[0] || 'Account'}</Link>
@@ -75,6 +76,12 @@ function NavBar() {
 }
 
 function Footer() {
+  const nav = useNavigate();
+  const { pathname } = useLocation();
+  const jump = (id) => {
+    if (pathname === '/') document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' });
+    else nav('/#' + id);
+  };
   return (
     <footer className="foot">
       <div className="web-wrap">
@@ -91,7 +98,9 @@ function Footer() {
           </div>
           <div>
             <div style={{ color: '#fff', fontWeight: 800, marginBottom: 8, fontSize: 14 }}>Service</div>
-            <a>How it works</a><a>Pricing</a><a>Areas covered</a>
+            <a onClick={() => jump('how')} style={{ cursor: 'pointer' }}>How it works</a>
+            <a onClick={() => jump('pricing')} style={{ cursor: 'pointer' }}>Pricing</a>
+            <a onClick={() => jump('areas')} style={{ cursor: 'pointer' }}>Areas covered</a>
           </div>
           <div>
             <div style={{ color: '#fff', fontWeight: 800, marginBottom: 8, fontSize: 14 }}>Support</div>

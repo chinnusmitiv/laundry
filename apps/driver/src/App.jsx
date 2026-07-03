@@ -2,10 +2,17 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import QRCode from 'qrcode';
 import {
   api, fmt, getSocket, useSocket, STATUS_FLOW, STATUS_LABEL, GARMENT_LABEL, HANDOVER,
-  Logo, Button, Card, Chip, Avatar, StatusPill, TopBar, Sheet, Empty, OneMap,
+  Logo, Button, Card, Chip, Field, Avatar, StatusPill, TopBar, Sheet, Empty, OneMap,
 } from '@shared';
 
-const DRIVER_ID = 'drv_1'; // demo session: Marcus Reid
+// ─────────────────────────────────────── AUTH SESSION
+const AUTH_KEY = 'cl_driver_auth';
+function loadAuth() { try { return JSON.parse(localStorage.getItem(AUTH_KEY) || 'null'); } catch { return null; } }
+function saveAuth(user) { localStorage.setItem(AUTH_KEY, JSON.stringify(user)); }
+function logout() { localStorage.removeItem(AUTH_KEY); location.reload(); }
+
+// the signed-in driver id, used throughout the app (set on login / page load)
+let DRIVER_ID = loadAuth()?.id || null;
 
 // driver actions mapped to the next status they can set
 const ACTIONS = {
@@ -17,6 +24,50 @@ const ACTIONS = {
 };
 
 export default function App() {
+  const [auth, setAuth] = useState(loadAuth);
+  if (!auth) {
+    return <DriverLogin onAuth={(user) => { DRIVER_ID = user.id; saveAuth(user); setAuth(user); }} />;
+  }
+  DRIVER_ID = auth.id;
+  return <DriverApp />;
+}
+
+function DriverLogin({ onAuth }) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  const submit = async () => {
+    setErr(''); setBusy(true);
+    try {
+      const { user } = await api.post('/api/auth/driver-login', { email, password });
+      onAuth(user);
+    } catch (e) { setErr(e.message || 'Could not sign in. Try again.'); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="cl-phone" style={{ background: 'var(--navy)' }}>
+      <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '32px 24px' }}>
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 10 }}>
+          <Logo size={30} theme="dark" tagline />
+        </div>
+        <div style={{ textAlign: 'center', color: 'rgba(255,255,255,.55)', fontSize: 14, marginBottom: 26 }}>Driver sign in</div>
+        <div className="cl-card" style={{ padding: 20 }}>
+          <Field label="Email" type="email" autoComplete="username" placeholder="you@chaselaundry.com" value={email}
+            onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
+          <Field label="Password" type="password" autoComplete="current-password" placeholder="••••••••" value={password}
+            onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
+          {err && <div style={{ background: 'rgba(239,68,68,.1)', color: 'var(--danger)', fontSize: 13, fontWeight: 600, padding: '10px 12px', borderRadius: 10, marginBottom: 12 }}>{err}</div>}
+          <Button variant="lime" disabled={!email.trim() || !password || busy} onClick={submit}>{busy ? 'Signing in…' : 'Sign in'}</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DriverApp() {
   const [driver, setDriver] = useState(null);
   const [shift, setShift] = useState(null);
   const [jobs, setJobs] = useState([]);
@@ -39,7 +90,7 @@ export default function App() {
     <div className="cl-phone">
       <TopBar
         left={<Logo size={18} theme="dark" />}
-        right={<Chip variant="navy">DRIVER</Chip>}
+        right={<div className="cl-row" style={{ gap: 10 }}><Chip variant="navy">DRIVER</Chip><a onClick={logout} style={{ fontSize: 12, color: 'rgba(255,255,255,.6)', cursor: 'pointer' }}>Log out</a></div>}
       />
       <div className="cl-scroll" style={{ paddingBottom: 30 }}>
         <ShiftCard driver={driver} shift={shift} onChange={load} />

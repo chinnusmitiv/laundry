@@ -7,7 +7,7 @@ initSchema();
 // wipe (POC: clean slate each seed)
 const tables = ['reviews', 'referrals', 'credits', 'support_messages', 'support_threads',
   'notifications', 'driver_locations', 'shifts', 'transfers', 'garment_events', 'garments', 'order_items', 'orders',
-  'subscriptions', 'plans', 'catalog', 'addresses', 'facilities', 'users'];
+  'subscriptions', 'plans', 'business_rates', 'facility_pricing', 'catalog', 'addresses', 'facilities', 'users', 'settings'];
 db.exec('PRAGMA foreign_keys = OFF');
 for (const t of tables) db.exec(`DELETE FROM ${t}`);
 db.exec('PRAGMA foreign_keys = ON');
@@ -40,9 +40,13 @@ const cust2 = { id: 'cus_2', role: 'customer', name: 'Jordan Lee', email: 'jorda
 const insUser = db.prepare('INSERT INTO users (id,role,name,email,phone,avatar,facility_id,created_at) VALUES (@id,@role,@name,@email,@phone,@avatar,@facility_id,@created_at)');
 for (const u of [hq, opsCentral, opsEast, opsWest, driver1, driver2, cust1, cust2]) insUser.run({ ...u, created_at: now() });
 
-// demo customers can sign in with password "password"
+// demo customers + drivers can sign in with password "password"
 const setPw = db.prepare('UPDATE users SET password_hash = ? WHERE id = ?');
-for (const c of [cust1, cust2]) setPw.run(hashPassword('password'), c.id);
+for (const c of [cust1, cust2, driver1, driver2]) setPw.run(hashPassword('password'), c.id);
+
+// single shared Ops admin login
+db.prepare('INSERT INTO settings (key,value) VALUES (?,?)')
+  .run('ops_admin', JSON.stringify({ username: 'admin', password_hash: hashPassword('chaselaundry') }));
 
 // ---- addresses ----
 const insAddr = db.prepare('INSERT INTO addresses (id,user_id,label,line1,line2,city,postcode,lat,lng,is_default) VALUES (@id,@user_id,@label,@line1,@line2,@city,@postcode,@lat,@lng,@is_default)');
@@ -52,25 +56,34 @@ const addr2 = id('adr');
 insAddr.run({ id: addr2, user_id: cust2.id, label: 'Home', line1: '15 Tanjong Pagar Road', line2: '#08-11', city: 'Singapore', postcode: '088326', lat: 1.2766, lng: 103.8455, is_default: 1 });
 
 // ---- catalog ----
+// B2C: fixed retail pricing, ordered via the customer/web apps.
 const catalog = [
-  { name: 'Wash & Fold', category: 'wash_fold', unit: 'per_kg', price_cents: 350, icon: '🧺', eta_hours: 24 },
-  { name: 'Wash & Iron', category: 'wash_fold', unit: 'per_kg', price_cents: 550, icon: '👕', eta_hours: 24 },
-  { name: 'Shirt — Dry Clean', category: 'dry_clean', unit: 'per_item', price_cents: 450, icon: '👔', eta_hours: 48 },
-  { name: 'Suit (2pc) — Dry Clean', category: 'dry_clean', unit: 'per_item', price_cents: 1600, icon: '🕴️', eta_hours: 48 },
-  { name: 'Dress — Dry Clean', category: 'dry_clean', unit: 'per_item', price_cents: 1200, icon: '👗', eta_hours: 48 },
-  { name: 'Duvet (Double)', category: 'bedding', unit: 'per_item', price_cents: 1800, icon: '🛏️', eta_hours: 72 },
-  { name: 'Ironing Only', category: 'ironing', unit: 'per_item', price_cents: 250, icon: '🔥', eta_hours: 24 },
-  { name: 'Trainers — Deep Clean', category: 'specialty', unit: 'per_item', price_cents: 1500, icon: '👟', eta_hours: 72 },
+  { name: 'Wash & Fold', category: 'wash_fold', unit: 'per_kg', price_cents: 350, icon: '🧺', eta_hours: 24, scope: 'b2c' },
+  { name: 'Wash & Iron', category: 'wash_fold', unit: 'per_kg', price_cents: 550, icon: '👕', eta_hours: 24, scope: 'b2c' },
+  { name: 'Shirt — Dry Clean', category: 'dry_clean', unit: 'per_item', price_cents: 450, icon: '👔', eta_hours: 48, scope: 'b2c' },
+  { name: 'Suit (2pc) — Dry Clean', category: 'dry_clean', unit: 'per_item', price_cents: 1600, icon: '🕴️', eta_hours: 48, scope: 'b2c' },
+  { name: 'Dress — Dry Clean', category: 'dry_clean', unit: 'per_item', price_cents: 1200, icon: '👗', eta_hours: 48, scope: 'b2c' },
+  { name: 'Duvet (Double)', category: 'bedding', unit: 'per_item', price_cents: 1800, icon: '🛏️', eta_hours: 72, scope: 'b2c' },
+  { name: 'Ironing Only', category: 'ironing', unit: 'per_item', price_cents: 250, icon: '🔥', eta_hours: 24, scope: 'b2c' },
+  { name: 'Trainers — Deep Clean', category: 'specialty', unit: 'per_item', price_cents: 1500, icon: '👟', eta_hours: 72, scope: 'b2c' },
+  // B2B: corporate contract catalog — linens are itemised, towels are billed by the bag. Default prices, per-client rates can override.
+  { name: 'Hotel Bedsheet', category: 'linens', unit: 'per_item', price_cents: 180, icon: '🛏️', eta_hours: 24, scope: 'b2b' },
+  { name: 'Hotel Pillowcase', category: 'linens', unit: 'per_item', price_cents: 60, icon: '🛏️', eta_hours: 24, scope: 'b2b' },
+  { name: 'Restaurant Tablecloth', category: 'linens', unit: 'per_item', price_cents: 220, icon: '🍽️', eta_hours: 24, scope: 'b2b' },
+  { name: 'Restaurant Napkin', category: 'linens', unit: 'per_item', price_cents: 40, icon: '🍽️', eta_hours: 24, scope: 'b2b' },
+  { name: 'Gym Towels (per bag)', category: 'towels', unit: 'per_bag', price_cents: 2500, icon: '🏋️', eta_hours: 24, scope: 'b2b' },
+  { name: 'Nail Salon Towels (per bag)', category: 'towels', unit: 'per_bag', price_cents: 2000, icon: '💅', eta_hours: 24, scope: 'b2b' },
+  { name: 'Massage Parlour Towels (per bag)', category: 'towels', unit: 'per_bag', price_cents: 2200, icon: '💆', eta_hours: 24, scope: 'b2b' },
 ];
-const insCat = db.prepare('INSERT INTO catalog (id,name,category,unit,price_cents,icon,eta_hours) VALUES (@id,@name,@category,@unit,@price_cents,@icon,@eta_hours)');
+const insCat = db.prepare('INSERT INTO catalog (id,name,category,unit,price_cents,icon,eta_hours,scope) VALUES (@id,@name,@category,@unit,@price_cents,@icon,@eta_hours,@scope)');
 const catIds = {};
 for (const c of catalog) { const cid = id('cat'); catIds[c.name] = cid; insCat.run({ id: cid, ...c }); }
 
 // ---- plans ----
 const plans = [
-  { id: 'plan_lite', name: 'Lite', price_cents: 0, included_kg: 0, discount_pct: 0, free_delivery: 0, perks: JSON.stringify(['Pay as you go', 'Standard 24h turnaround']) },
-  { id: 'plan_plus', name: 'Plus', price_cents: 1900, included_kg: 6, discount_pct: 10, free_delivery: 1, perks: JSON.stringify(['6kg wash & fold / mo', '10% off everything', 'Free delivery', 'Priority slots']) },
-  { id: 'plan_pro', name: 'Pro', price_cents: 3900, included_kg: 15, discount_pct: 20, free_delivery: 1, perks: JSON.stringify(['15kg wash & fold / mo', '20% off everything', 'Free delivery', 'Same-day available', 'Dedicated support']) },
+  { id: 'plan_lite', name: 'Lite', price_cents: 0, included_kg: 0, discount_pct: 0, free_delivery: 0, perks: JSON.stringify(['Pay as you go', 'S$3.99 service fee per order', 'Standard 24h turnaround']) },
+  { id: 'plan_plus', name: 'Plus', price_cents: 1900, included_kg: 0, discount_pct: 0, free_delivery: 1, perks: JSON.stringify(['No S$3.99 service fee', 'Free delivery', 'Priority pickup slots']) },
+  { id: 'plan_pro', name: 'Pro', price_cents: 3900, included_kg: 0, discount_pct: 0, free_delivery: 1, perks: JSON.stringify(['No S$3.99 service fee', 'Free delivery', 'Top-priority pickup slots (queue-jump)', 'Faster turnaround ETA', 'Dedicated support']) },
 ];
 const insPlan = db.prepare('INSERT INTO plans (id,name,price_cents,included_kg,discount_pct,free_delivery,perks) VALUES (@id,@name,@price_cents,@included_kg,@discount_pct,@free_delivery,@perks)');
 for (const p of plans) insPlan.run(p);
@@ -108,7 +121,7 @@ function seedJourney(garmentId, currentStatus) {
 }
 
 let orderSeq = 1042;
-function makeOrder({ customer, address, driver, facility, status, items, garments, paid, platformFee = 99, deliveryFee = 0, discount = 0, credit = 0 }) {
+function makeOrder({ customer, address, driver, facility, status, items, garments, paid, platformFee = 399, deliveryFee = 0, discount = 0, credit = 0 }) {
   const oid = id('ord');
   const subtotal = items.reduce((s, it) => s + it.price_cents, 0);
   const total = subtotal + platformFee + deliveryFee - discount - credit;
@@ -133,7 +146,7 @@ function makeOrder({ customer, address, driver, facility, status, items, garment
 // Order in progress at facility (rich garment tracking)
 makeOrder({
   customer: cust1, address: addr1, driver: driver1, facility: WH.central, status: 'processing', paid: true,
-  platformFee: 99, deliveryFee: 0, discount: 90, credit: 300,
+  platformFee: 0, deliveryFee: 0, credit: 300,
   items: [
     { catalog_id: catIds['Wash & Iron'], name: 'Wash & Iron', weight_kg: 4.2, price_cents: 2310 },
     { catalog_id: catIds['Shirt — Dry Clean'], name: 'Shirt — Dry Clean', qty: 2, price_cents: 900 },
@@ -150,7 +163,7 @@ makeOrder({
 // Active delivery (driver en route) — used for live tracking demo
 makeOrder({
   customer: cust1, address: addr1, driver: driver1, facility: WH.central, status: 'driver_en_route', paid: false,
-  platformFee: 99, deliveryFee: 0,
+  platformFee: 0, deliveryFee: 0,
   items: [{ catalog_id: catIds['Wash & Fold'], name: 'Wash & Fold', weight_kg: 5.5, price_cents: 1925 }],
   garments: [],
 });
@@ -158,7 +171,7 @@ makeOrder({
 // Fresh unassigned order (ops needs to assign a driver)
 makeOrder({
   customer: cust2, address: addr2, driver: null, status: 'placed', paid: false,
-  platformFee: 99, deliveryFee: 250,
+  platformFee: 399, deliveryFee: 250,
   items: [
     { catalog_id: catIds['Suit (2pc) — Dry Clean'], name: 'Suit (2pc) — Dry Clean', qty: 1, price_cents: 1600 },
     { catalog_id: catIds['Duvet (Double)'], name: 'Duvet (Double)', qty: 1, price_cents: 1800 },
@@ -169,7 +182,7 @@ makeOrder({
 // A completed past order (history + review)
 const pastOrder = makeOrder({
   customer: cust1, address: addr1, driver: driver2, facility: WH.east, status: 'completed', paid: true,
-  platformFee: 99,
+  platformFee: 0,
   items: [{ catalog_id: catIds['Wash & Fold'], name: 'Wash & Fold', weight_kg: 3.0, price_cents: 1050 }],
   garments: [],
 });
@@ -238,7 +251,7 @@ for (const [facId, pricing] of Object.entries(whPricing)) {
 
 console.log('✅ Seeded ChaseLaundry POC database.');
 console.log('   Customers:  cus_1 (Alex, on Plus), cus_2 (Jordan)');
-console.log('   Drivers:    drv_1 (Marcus, on shift), drv_2 (Priya)');
+console.log('   Drivers:    drv_1 (Marcus, on shift), drv_2 (Priya) — log in with marcus@chaselaundry.com / priya@chaselaundry.com, password "password"');
 console.log('   Warehouses: Central Hub, East Hub, West Hub');
-console.log('   Ops:        ops_hq (HQ), ops_central, ops_east, ops_west');
+console.log('   Ops:        ops_hq (HQ), ops_central, ops_east, ops_west — Ops admin login: admin / chaselaundry');
 db.close();
