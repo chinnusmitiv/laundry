@@ -117,17 +117,43 @@ export function BottomNav({ tabs, active, onChange }) {
   );
 }
 
-// bottom sheet / modal
+// full-screen panel that slides in from the right (LaundryHeap-style "push" navigation),
+// and slides back out the same way on close instead of just vanishing.
+const SHEET_ANIM_MS = 220;
 export function Sheet({ open, onClose, title, children }) {
-  if (!open) return null;
+  const [mounted, setMounted] = useState(open);
+  const [closing, setClosing] = useState(false);
+
+  useEffect(() => {
+    if (open) { setMounted(true); setClosing(false); return; }
+    if (mounted) {
+      setClosing(true);
+      const t = setTimeout(() => { setMounted(false); setClosing(false); }, SHEET_ANIM_MS);
+      return () => clearTimeout(t);
+    }
+    // eslint-disable-next-line
+  }, [open]);
+
+  if (!mounted) return null;
+  const anim = closing ? 'clSlideOut' : 'clSlideIn';
   return (
-    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(22,32,64,.45)', zIndex: 50, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: 'var(--light)', width: '100%', maxWidth: 460, borderRadius: '24px 24px 0 0', padding: 20, maxHeight: '92vh', overflowY: 'auto', animation: 'clUp .25s ease' }}>
-        <div style={{ width: 40, height: 4, background: 'var(--gray3)', borderRadius: 4, margin: '0 auto 16px' }} />
-        {title && <div style={{ fontSize: 18, fontWeight: 900, marginBottom: 14 }}>{title}</div>}
-        {children}
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(22,32,64,.45)', zIndex: 50, display: 'flex', justifyContent: 'center', animation: `${closing ? 'clFadeOut' : 'clFadeIn'} ${SHEET_ANIM_MS}ms ease` }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: 'var(--light)', width: '100%', maxWidth: 460, height: '100%', display: 'flex', flexDirection: 'column', animation: `${anim} ${SHEET_ANIM_MS}ms ease forwards` }}>
+        <div className="cl-between" style={{ padding: '16px 16px 14px', background: '#fff', borderBottom: '1px solid var(--gray3)', flexShrink: 0 }}>
+          <button onClick={onClose} style={{ fontSize: 22, color: 'var(--navy)', width: 30, flexShrink: 0, textAlign: 'left' }}>‹</button>
+          <div style={{ fontSize: 15, fontWeight: 800, flex: 1, textAlign: 'center', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', padding: '0 8px' }}>{title}</div>
+          <button onClick={onClose} style={{ fontSize: 13, fontWeight: 700, color: 'var(--navy)', flexShrink: 0 }}>Cancel</button>
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
+          {children}
+        </div>
       </div>
-      <style>{`@keyframes clUp{from{transform:translateY(40px);opacity:.6}to{transform:translateY(0);opacity:1}}`}</style>
+      <style>{`
+        @keyframes clSlideIn{from{transform:translateX(100%)}to{transform:translateX(0)}}
+        @keyframes clSlideOut{from{transform:translateX(0)}to{transform:translateX(100%)}}
+        @keyframes clFadeIn{from{opacity:0}to{opacity:1}}
+        @keyframes clFadeOut{from{opacity:1}to{opacity:0}}
+      `}</style>
     </div>
   );
 }
