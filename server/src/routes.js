@@ -211,6 +211,16 @@ export function registerRoutes(app, io) {
     });
   });
 
+  // update the customer's own profile (name + phone only — email is the login identifier and can't change here)
+  app.post('/api/customers/:id/profile', (req, res) => {
+    const uid = req.params.id;
+    const name = String(req.body.name || '').trim();
+    const phone = String(req.body.phone || '').trim();
+    if (!name) return res.status(400).json({ error: 'Name is required.' });
+    db.prepare('UPDATE users SET name = ?, phone = ? WHERE id = ?').run(name, phone || null, uid);
+    res.json(getUser(uid));
+  });
+
   // add a saved address (from a places-autocomplete selection)
   app.post('/api/customers/:id/addresses', (req, res) => {
     const uid = req.params.id;
@@ -220,6 +230,23 @@ export function registerRoutes(app, io) {
     db.prepare('INSERT INTO addresses (id,user_id,label,type,line1,line2,city,postcode,lat,lng,is_default) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
       .run(aid, uid, label || 'New address', type || 'home', line1 ?? null, line2 ?? null, city || 'Singapore', postcode ?? null, lat ?? null, lng ?? null, make_default ? 1 : 0);
     res.json(db.prepare('SELECT * FROM addresses WHERE id = ?').get(aid));
+  });
+
+  // edit an existing saved address's details
+  app.post('/api/customers/:id/addresses/:addrId', (req, res) => {
+    const { id: uid, addrId } = req.params;
+    const { label, type, line1, line2, city, postcode } = req.body;
+    db.prepare(`UPDATE addresses SET label = ?, type = ?, line1 = ?, line2 = ?, city = ?, postcode = ? WHERE id = ? AND user_id = ?`)
+      .run(label ?? null, type ?? null, line1 ?? null, line2 ?? null, city ?? null, postcode ?? null, addrId, uid);
+    res.json(db.prepare('SELECT * FROM addresses WHERE id = ?').get(addrId));
+  });
+
+  // mark an existing saved address as the default
+  app.post('/api/customers/:id/addresses/:addrId/default', (req, res) => {
+    const { id: uid, addrId } = req.params;
+    db.prepare('UPDATE addresses SET is_default = 0 WHERE user_id = ?').run(uid);
+    db.prepare('UPDATE addresses SET is_default = 1 WHERE id = ? AND user_id = ?').run(addrId, uid);
+    res.json(db.prepare('SELECT * FROM addresses WHERE user_id = ?').all(uid));
   });
 
   app.get('/api/customers/:id/orders', (req, res) => {
@@ -238,7 +265,7 @@ export function registerRoutes(app, io) {
 
   // create order — consumer (app) OR B2B (warehouse, invoiced, no app account)
   app.post('/api/orders', (req, res) => {
-    let { customer_id, address_id, items = [], pickup_slot, return_slot, notes, use_credit, handover, handover_contact, facility_id, driver_id, business_name, business_phone, repeat_requested, repeat_cadence } = req.body;
+    let { customer_id, address_id, items = [], pickup_slot, return_slot, notes, use_credit, handover, handover_contact, facility_id, driver_id, business_name, business_phone, repeat_requested, repeat_cadence, tip_cents = 0 } = req.body;
 
     // B2B: no customer account — find-or-create a lightweight business client (role='business', no login)
     const isB2B = !!(business_name && business_name.trim());
@@ -269,12 +296,13 @@ export function registerRoutes(app, io) {
     // B2B drops off at the warehouse → starts in processing flow; consumer flow starts at pickup
     const status = driver_id ? 'assigned' : (isB2B && facility_id ? 'at_facility' : 'placed');
     const paymentStatus = isB2B ? 'invoiced' : 'pending'; // B2B billed on terms, not pay-now
+    const tipCents = isB2B ? 0 : Math.max(0, Math.round(tip_cents || 0));
     db.prepare(`INSERT INTO orders (id,code,customer_id,address_id,driver_id,facility_id,status,pickup_slot,return_slot,notes,handover,handover_contact,
-        subtotal_cents,platform_fee_cents,delivery_fee_cents,discount_cents,credit_applied_cents,total_cents,payment_status,repeat_requested,repeat_cadence,created_at,updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, ?, ?, ?, ?, ?)`)
+        subtotal_cents,platform_fee_cents,delivery_fee_cents,discount_cents,credit_applied_cents,tip_cents,total_cents,payment_status,repeat_requested,repeat_cadence,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, ?, ?, ?, ?, ?)`)
       .run(oid, code, customer_id, address_id ?? null, driver_id ?? null, facility_id ?? null, status, pickup_slot ?? null, return_slot ?? null, notes || '', handover ?? null, handover_contact ?? null,
         pricing.subtotal_cents, pricing.platform_fee_cents, pricing.delivery_fee_cents,
-        pricing.discount_cents, pricing.credit_applied_cents, pricing.total_cents, paymentStatus, repeat_requested ? 1 : 0, repeat_requested ? (repeat_cadence || 'weekly') : null, now(), now());
+        pricing.discount_cents, pricing.credit_applied_cents, tipCents, pricing.total_cents + tipCents, paymentStatus, repeat_requested ? 1 : 0, repeat_requested ? (repeat_cadence || 'weekly') : null, now(), now());
     if (driver_id) io.to(`user:${driver_id}`).emit('job:assigned', fullOrder(oid));
     for (const it of items) {
       const cat = db.prepare('SELECT * FROM catalog WHERE id = ?').get(it.catalog_id);

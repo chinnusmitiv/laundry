@@ -90,11 +90,22 @@ export function TopBar({ left, right, title, subtitle }) {
   );
 }
 
-// bottom tab nav for mobile apps
+// bottom tab nav for mobile apps. A tab with `fab: true` renders as an
+// elevated circular action button (e.g. "Book now") instead of a plain icon+label.
 export function BottomNav({ tabs, active, onChange }) {
   return (
-    <div style={{ position: 'fixed', bottom: 0, left: '50%', transform: 'translateX(-50%)', width: '100%', maxWidth: 460, background: '#fff', borderTop: '1px solid var(--gray3)', display: 'flex', padding: '8px 4px 14px', zIndex: 30 }}>
-      {tabs.map((t) => (
+    <div style={{ position: 'fixed', bottom: 0, left: '50%', transform: 'translateX(-50%)', width: '100%', maxWidth: 460, background: '#fff', borderTop: '1px solid var(--gray3)', display: 'flex', alignItems: 'flex-end', padding: '8px 4px 14px', zIndex: 30 }}>
+      {tabs.map((t) => t.fab ? (
+        <button key={t.key} onClick={() => onChange(t.key)}
+          style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+          <span style={{
+            width: 52, height: 52, borderRadius: 52, background: 'var(--navy)', color: 'var(--lime)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, fontWeight: 700,
+            marginTop: -30, boxShadow: '0 8px 18px rgba(17,22,58,.35)', border: '4px solid #fff',
+          }}>{t.icon}</span>
+          <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--navy)' }}>{t.label}</span>
+        </button>
+      ) : (
         <button key={t.key} onClick={() => onChange(t.key)}
           style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, padding: '6px 0', color: active === t.key ? 'var(--navy)' : 'var(--gray2)', position: 'relative' }}>
           <span style={{ fontSize: 21 }}>{t.icon}</span>

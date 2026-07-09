@@ -133,8 +133,11 @@ export async function printInvoice(order) {
   if (o.delivery_fee_cents) row('Delivery', m(o.delivery_fee_cents));
   if (o.discount_cents > 0) row('Discount', '- ' + m(o.discount_cents));
   if (o.credit_applied_cents > 0) row('Wallet credit', '- ' + m(o.credit_applied_cents));
+  if (o.tip_cents > 0) row('Driver tip', m(o.tip_cents));
   if (o.tax_cents > 0) row('GST (9%)', m(o.tax_cents));
-  doc.setDrawColor(...navy); doc.setLineWidth(1); doc.line(lx, ty - 7, right, ty - 7);
+  ty += 4;
+  doc.setDrawColor(...navy); doc.setLineWidth(1); doc.line(lx, ty, right, ty);
+  ty += 20;
   row('Total', m(o.total_cents), true);
 
   // ── footer ──

@@ -62,21 +62,22 @@ function CustomerApp() {
       />
 
       <div className="cl-scroll">
-        {tab === 'home' && <Home summary={summary} orders={orders} onOpenOrder={setOpenOrder} onOrder={() => setFlowOpen(true)} onTab={setTab} />}
+        {tab === 'home' && <Home summary={summary} orders={orders} onOpenOrder={setOpenOrder} onOrder={() => setFlowOpen(true)} onTab={setTab} onReload={load} />}
+        {tab === 'prices' && <Prices onOrder={() => setFlowOpen(true)} />}
         {tab === 'orders' && <Orders orders={orders} onOpenOrder={setOpenOrder} onOrder={() => setFlowOpen(true)} />}
         {tab === 'wallet' && <Wallet onReload={load} />}
         {tab === 'support' && <Support />}
-        {tab === 'account' && <Account summary={summary} onReload={load} />}
+        {tab === 'account' && <Account summary={summary} onReload={load} onTab={setTab} openOrders={summary?.open_orders || 0} />}
       </div>
 
       <BottomNav
-        active={tab} onChange={setTab}
+        active={tab} onChange={(k) => (k === 'book' ? setFlowOpen(true) : setTab(k))}
         tabs={[
           { key: 'home', label: 'Home', icon: '🏠' },
-          { key: 'orders', label: 'Orders', icon: '📦', badge: summary?.open_orders || 0 },
-          { key: 'wallet', label: 'Wallet', icon: '💳' },
-          { key: 'support', label: 'Support', icon: '💬' },
-          { key: 'account', label: 'Account', icon: '👤' },
+          { key: 'prices', label: 'Prices', icon: '🏷️' },
+          { key: 'book', label: 'Book now', icon: '+', fab: true },
+          { key: 'wallet', label: 'Prepaid', icon: '💳' },
+          { key: 'account', label: 'More', icon: '☰' },
         ]}
       />
 
@@ -193,63 +194,114 @@ function ErrBox({ children }) {
 
 
 // ─────────────────────────────────────── HOME
-function Home({ summary, orders, onOpenOrder, onOrder, onTab }) {
+function Home({ summary, orders, onOpenOrder, onOrder, onTab, onReload }) {
+  const [addrPickerOpen, setAddrPickerOpen] = useState(false);
   if (!summary) return <Loading />;
   const active = orders.filter((o) => !['completed', 'cancelled'].includes(o.status));
+  const addr = summary.addresses?.find((a) => a.is_default) || summary.addresses?.[0];
+
   return (
     <div style={{ padding: 18 }}>
-      <div style={{ marginBottom: 18 }}>
-        <div className="cl-muted" style={{ fontSize: 14 }}>Good afternoon,</div>
-        <div style={{ fontSize: 26, fontWeight: 900, letterSpacing: '-.5px' }}>{summary.user.name.split(' ')[0]} 👋</div>
-      </div>
+      {/* address pill */}
+      <button onClick={() => setAddrPickerOpen(true)} className="cl-row" style={{ gap: 8, background: '#fff', borderRadius: 999, padding: '10px 16px', boxShadow: 'var(--shadow-sm)', marginBottom: 20, maxWidth: '100%' }}>
+        <span style={{ fontSize: 15, flexShrink: 0 }}>🏠</span>
+        <span style={{ fontWeight: 800, fontSize: 12, letterSpacing: '.3px', color: 'var(--navy)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {addr ? addr.line1.toUpperCase() : 'ADD YOUR ADDRESS'}
+        </span>
+        <span style={{ color: 'var(--gray2)', flexShrink: 0 }}>›</span>
+      </button>
 
-      {/* wallet + plan strip */}
-      <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
-        <Card style={{ flex: 1, background: 'var(--navy)', color: '#fff' }}>
-          <div className="cl-eyebrow" style={{ color: 'rgba(255,255,255,.4)' }}>Wallet</div>
-          <div style={{ fontSize: 24, fontWeight: 900, marginTop: 6 }}>{fmt.money(summary.balance_cents)}</div>
-          <div style={{ fontSize: 11, color: 'var(--lime)', marginTop: 2 }}>credit available</div>
-        </Card>
-        <Card style={{ flex: 1, background: 'var(--lime)', color: 'var(--navy)' }}>
-          <div className="cl-eyebrow" style={{ color: 'rgba(29,41,81,.45)' }}>Plan</div>
-          <div style={{ fontSize: 24, fontWeight: 900, marginTop: 6 }}>{summary.subscription?.plan_name || 'Lite'}</div>
-          <div style={{ fontSize: 11, fontWeight: 700, marginTop: 2 }}>{summary.subscription ? 'No service fee · free delivery' : 'pay as you go'}</div>
-        </Card>
-      </div>
+      <AddressPicker open={addrPickerOpen} onClose={() => setAddrPickerOpen(false)} summary={summary} onReload={onReload} />
 
-      {/* primary CTA */}
-      <Card style={{ background: 'linear-gradient(135deg,#162040,#253470)', color: '#fff', marginBottom: 16 }}>
-        <div style={{ fontSize: 19, fontWeight: 900, letterSpacing: '-.3px' }}>More Life. Less Laundry.</div>
-        <div style={{ fontSize: 13, color: 'rgba(255,255,255,.55)', marginTop: 4, marginBottom: 16 }}>We collect, wash & return within 24h. You just relax can already. 😌</div>
-        <Button variant="lime" onClick={onOrder}>Chiong, schedule a pickup →</Button>
-      </Card>
+      {/* active orders, or empty state */}
+      {active.length > 0 ? (
+        <div style={{ marginBottom: 18 }}>
+          <div className="cl-eyebrow" style={{ marginBottom: 10 }}>Active orders</div>
+          {active.map((o) => <OrderRow key={o.id} o={o} onClick={() => onOpenOrder(o.id)} />)}
+        </div>
+      ) : (
+        <div style={{ fontSize: 19, fontWeight: 700, color: 'var(--navy)', marginBottom: 20 }}>You don't have any active orders.</div>
+      )}
 
       {/* demo: spawn a live-tracking order */}
       <Card onClick={async () => { const o = await api.post(`/api/demo/customers/${CUSTOMER_ID}/spawn-tracking`); onOpenOrder(o.id); }}
-        style={{ marginBottom: 16, border: '1.5px dashed var(--navy)', cursor: 'pointer' }}>
+        style={{ marginBottom: 14, border: '1.5px dashed var(--navy)', cursor: 'pointer' }}>
         <div className="cl-between">
           <div><div style={{ fontWeight: 900 }}>🚗 Track a live driver</div><div className="cl-muted" style={{ fontSize: 12, marginTop: 2 }}>Demo: spawn an out-for-delivery order & watch it move</div></div>
           <span style={{ fontSize: 22 }}>→</span>
         </div>
       </Card>
 
-      {/* active orders */}
-      {active.length > 0 && <>
-        <div className="cl-eyebrow" style={{ marginBottom: 10 }}>Active orders</div>
-        {active.map((o) => <OrderRow key={o.id} o={o} onClick={() => onOpenOrder(o.id)} />)}
-      </>}
+      {/* promo card stack */}
+      <Card style={{ marginBottom: 14, background: 'var(--lime-pale)' }} onClick={() => onTab('wallet')}>
+        <div className="cl-between" style={{ gap: 12 }}>
+          <div>
+            <div style={{ fontWeight: 900, color: 'var(--navy)', marginBottom: 4 }}>Refer a friend</div>
+            <div style={{ fontSize: 12, color: 'var(--gray)' }}>Your friend gets 15% off — you earn S$25 on their first order!</div>
+            <Button sm variant="navy" style={{ marginTop: 12 }} onClick={() => onTab('wallet')}>Invite friends</Button>
+          </div>
+          <span style={{ fontSize: 34, flexShrink: 0 }}>🎁</span>
+        </div>
+      </Card>
 
-      {/* referral promo */}
-      <Card style={{ marginTop: 16, border: '1.5px dashed var(--lime-d)', background: 'var(--lime-pale)' }} onClick={() => onTab('wallet')}>
+      <Card style={{ marginBottom: 14, background: 'var(--navy)', color: '#fff' }} onClick={() => onTab('wallet')}>
+        <div className="cl-between" style={{ gap: 12 }}>
+          <div>
+            <div style={{ fontWeight: 900 }}>Save on 6kg washes with Prepaid packs</div>
+            <div style={{ fontSize: 12, color: 'rgba(255,255,255,.6)', marginTop: 4 }}>Save up to 24%</div>
+          </div>
+          <span style={{ fontSize: 34, flexShrink: 0 }}>🧺</span>
+        </div>
+      </Card>
+
+      <Card style={{ marginBottom: 14, cursor: 'pointer' }} onClick={onOrder}>
+        <div className="cl-eyebrow" style={{ color: 'var(--lime-d)', marginBottom: 8 }}>Promotion</div>
+        <div style={{ fontWeight: 900, fontSize: 18, color: 'var(--navy)', marginBottom: 12 }}>10% off mixed wash!</div>
+        <Button sm variant="lime" onClick={onOrder}>Claim now</Button>
+      </Card>
+
+      <Card style={{ cursor: 'pointer' }} onClick={() => onTab('account')}>
         <div className="cl-between">
           <div>
-            <div style={{ fontWeight: 900, color: 'var(--navy)' }}>Give S$5, get S$5</div>
-            <div style={{ fontSize: 12, color: 'var(--gray)', marginTop: 2 }}>Invite your kaki → both get credit, win-win lah</div>
+            <div style={{ fontWeight: 900, color: 'var(--navy)' }}>ChaseLaundry+</div>
+            <div style={{ fontSize: 12, color: 'var(--gray)', marginTop: 2 }}>Skip the service fee for just S$19 / month</div>
           </div>
-          <span style={{ fontSize: 26 }}>🎁</span>
+          <span style={{ fontWeight: 800, color: 'var(--navy)', flexShrink: 0 }}>Join now ›</span>
         </div>
       </Card>
     </div>
+  );
+}
+
+// pick which saved address is active, or add a new one
+function AddressPicker({ open, onClose, summary, onReload }) {
+  const [adding, setAdding] = useState(false);
+  const addresses = summary?.addresses || [];
+
+  useEffect(() => { if (open) setAdding(false); }, [open]);
+
+  const choose = async (a) => {
+    if (!a.is_default) await api.post(`/api/customers/${CUSTOMER_ID}/addresses/${a.id}/default`);
+    onReload?.();
+    onClose();
+  };
+
+  return (
+    <Sheet open={open} onClose={onClose} title="Choose your address">
+      {!adding && addresses.map((a) => (
+        <Card key={a.id} onClick={() => choose(a)} style={{ marginBottom: 10, cursor: 'pointer', border: a.is_default ? '2px solid var(--navy)' : '2px solid transparent' }}>
+          <div className="cl-between">
+            <div><div style={{ fontWeight: 700 }}>{ADDRESS_TYPES[a.type]?.icon || '📍'} {a.label}</div><div className="cl-muted" style={{ fontSize: 13 }}>{a.line1}, {a.postcode}</div></div>
+            {a.is_default ? <span>✓</span> : null}
+          </div>
+        </Card>
+      ))}
+      {!adding ? (
+        <Button variant="ghost" onClick={() => setAdding(true)}>+ Add new address</Button>
+      ) : (
+        <AddAddress customerId={CUSTOMER_ID} onSaved={() => { onReload?.(); onClose(); }} onCancel={() => setAdding(false)} />
+      )}
+    </Sheet>
   );
 }
 
@@ -264,6 +316,58 @@ function OrderRow({ o, onClick }) {
         <StatusPill status={o.status} label={o.status_label} />
       </div>
     </Card>
+  );
+}
+
+// ─────────────────────────────────────── PRICES (read-only catalog browse)
+const CATEGORY_CHIPS = {
+  wash_fold: ['WASH', 'TUMBLE-DRY', 'FOLDED', 'IN A BAG'],
+  dry_clean: ['DRY CLEANING', 'IRONING', 'ON HANGERS'],
+  bedding: ['CUSTOM CLEANING'],
+  ironing: ['IRONING', 'ON HANGERS'],
+  specialty: ['CUSTOM CLEANING'],
+};
+const CATEGORY_DESC = {
+  wash_fold: 'For everyday laundry, bedsheets and towels.',
+  dry_clean: 'For everyday laundry that requires ironing after washing, or for dry cleaning.',
+  bedding: 'For larger items that require extra care.',
+  ironing: 'For items that are already clean.',
+  specialty: 'Specialist care for delicate or bulky items.',
+};
+function etaLabel(hours) {
+  return hours >= 24 ? `${Math.round(hours / 24)} day service` : `${hours}h turnaround`;
+}
+
+function Prices({ onOrder }) {
+  const [catalog, setCatalog] = useState(null);
+  useEffect(() => { api.get('/api/catalog').then(setCatalog); }, []);
+  return (
+    <div style={{ padding: 18 }}>
+      <div style={{ fontSize: 22, fontWeight: 900, marginBottom: 4 }}>Prices</div>
+      <p className="cl-muted" style={{ fontSize: 13, marginBottom: 16 }}>Straightforward pricing, no surprises.</p>
+      {!catalog ? <Loading /> : catalog.map((c) => (
+        <Card key={c.id} style={{ marginBottom: 12 }}>
+          <div className="cl-between" style={{ alignItems: 'flex-start', gap: 12 }}>
+            <div className="cl-row" style={{ gap: 10 }}>
+              <span style={{ fontSize: 24 }}>{c.icon}</span>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: 15 }}>{c.name}</div>
+                <div className="cl-muted" style={{ fontSize: 12, marginTop: 2 }}>From {fmt.money(c.price_cents)} Price per {c.unit === 'per_kg' ? 'kg' : 'item'}</div>
+              </div>
+            </div>
+            <Button sm variant="ghost" onClick={onOrder}>+ Add</Button>
+          </div>
+          <div className="cl-row" style={{ gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
+            {(CATEGORY_CHIPS[c.category] || []).map((t) => <Chip key={t} variant="gray">{t}</Chip>)}
+          </div>
+          <div className="cl-between" style={{ marginTop: 8, alignItems: 'flex-end' }}>
+            <div className="cl-muted" style={{ fontSize: 12, maxWidth: 240 }}>{CATEGORY_DESC[c.category]}</div>
+            <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--navy)', flexShrink: 0 }}>{etaLabel(c.eta_hours)}</span>
+          </div>
+        </Card>
+      ))}
+      <Button variant="lime" onClick={onOrder} style={{ marginTop: 4 }}>Book now</Button>
+    </div>
   );
 }
 
@@ -400,6 +504,7 @@ function OrderDetail({ orderId, onClose }) {
           <Line l="Delivery" v={o.delivery_fee_cents ? fmt.money(o.delivery_fee_cents) : 'FREE'} />
           {o.discount_cents > 0 && <Line l="Plan discount" v={`– ${fmt.money(o.discount_cents)}`} green />}
           {o.credit_applied_cents > 0 && <Line l="Wallet credit" v={`– ${fmt.money(o.credit_applied_cents)}`} green />}
+          {o.tip_cents > 0 && <Line l="Driver tip" v={fmt.money(o.tip_cents)} />}
           <div className="cl-divider" />
           <Line l={<b>Total</b>} v={<b>{fmt.money(o.total_cents)}</b>} />
         </Card>
@@ -495,10 +600,18 @@ function OrderFlow({ open, onClose, onPlaced, summary }) {
   const [handoverContact, setHandoverContact] = useState('');
   const [repeat, setRepeat] = useState(false);
   const [repeatCadence, setRepeatCadence] = useState('weekly');
+  const [noteOpen, setNoteOpen] = useState({}); // catalogId -> bool, "any special requests?" expanded
+  const [tipCents, setTipCents] = useState(0);
+  const [chargesInfoOpen, setChargesInfoOpen] = useState(false);
+  const [plans, setPlans] = useState([]);
+  const [upsellPlan, setUpsellPlan] = useState(null);
+  const [payPlan, setPayPlan] = useState(null); // paid plan awaiting card auth, chosen at checkout
 
   useEffect(() => {
     if (open) {
-      api.get('/api/catalog').then(setCatalog); setStep(1); setCart({}); setAdding(false); setNotes(''); setHandover('hand_to_me'); setHandoverContact(''); setRepeat(false); setRepeatCadence('weekly');
+      api.get('/api/catalog').then(setCatalog); api.get('/api/plans').then(setPlans);
+      setStep(1); setCart({}); setNoteOpen({}); setAdding(false); setNotes(''); setHandover('hand_to_me'); setHandoverContact(''); setRepeat(false); setRepeatCadence('weekly');
+      setTipCents(0); setChargesInfoOpen(false); setUpsellPlan(null); setPayPlan(null);
       const addrs = summary?.addresses || [];
       setAddresses(addrs); setAddrId((addrs.find((a) => a.is_default) || addrs[0])?.id || null);
     }
@@ -513,15 +626,30 @@ function OrderFlow({ open, onClose, onPlaced, summary }) {
     // eslint-disable-next-line
   }, [step, useCredit]);
 
+  const itemNotes = Object.entries(cart).filter(([, v]) => v.note?.trim()).map(([cid, v]) => `${catalog.find((c) => c.id === cid)?.name}: ${v.note.trim()}`);
+  const combinedNotes = [notes.trim(), ...itemNotes].filter(Boolean).join(' · ');
+
   const place = async () => {
     setPlacing(true);
     const o = await api.post('/api/orders', {
       customer_id: summary.user.id, address_id: addrId, items,
-      pickup_slot: slot, return_slot: 'Thu · 18:00–20:00', use_credit: useCredit, notes,
+      pickup_slot: slot, return_slot: 'Thu · 18:00–20:00', use_credit: useCredit, notes: combinedNotes,
       handover, handover_contact: handover === 'someone_else' ? handoverContact : null,
-      repeat_requested: repeat, repeat_cadence: repeat ? repeatCadence : null,
+      repeat_requested: repeat, repeat_cadence: repeat ? repeatCadence : null, tip_cents: tipCents,
     });
     setPlacing(false); onPlaced(o);
+  };
+
+  const activatePlan = (plan_id) => api.post(`/api/customers/${summary.user.id}/subscription`, { plan_id });
+
+  // if the customer picked a checkout upsell plan, subscribe first (paid plans need card auth), then place the order
+  const placeWithUpsell = async () => {
+    if (upsellPlan) {
+      const plan = plans.find((p) => p.id === upsellPlan);
+      if (plan?.price_cents) { setPayPlan(plan); return; }
+      await activatePlan(upsellPlan);
+    }
+    await place();
   };
 
   const setItem = (id, patch) => setCart((c) => ({ ...c, [id]: { ...c[id], ...patch } }));
@@ -532,24 +660,43 @@ function OrderFlow({ open, onClose, onPlaced, summary }) {
         <p className="cl-muted" style={{ fontSize: 13, marginBottom: 14 }}>What needs cleaning?</p>
         {catalog.map((c) => {
           const v = cart[c.id] || {};
+          const added = (c.unit === 'per_kg' ? v.weight : v.qty) > 0;
           return (
-            <Card key={c.id} style={{ marginBottom: 10 }}>
-              <div className="cl-between">
+            <Card key={c.id} style={{ marginBottom: 10, background: added ? 'var(--lime-pale)' : '#fff', border: added ? '1.5px solid var(--lime-d)' : '1.5px solid transparent' }}>
+              <div className="cl-between" style={{ alignItems: 'flex-start', gap: 10 }}>
                 <div className="cl-row" style={{ gap: 10 }}>
                   <span style={{ fontSize: 24 }}>{c.icon}</span>
                   <div>
                     <div style={{ fontWeight: 800, fontSize: 14 }}>{c.name}</div>
-                    <div className="cl-muted" style={{ fontSize: 12 }}>{fmt.money(c.price_cents)} / {c.unit === 'per_kg' ? 'kg' : 'item'} · {c.eta_hours}h</div>
+                    <div className="cl-muted" style={{ fontSize: 12 }}>From {fmt.money(c.price_cents)} Price per {c.unit === 'per_kg' ? 'kg' : 'item'}</div>
                   </div>
                 </div>
-                {c.unit === 'per_kg'
-                  ? <Stepper value={v.weight || 0} step={0.5} unit="kg" onChange={(weight) => setItem(c.id, { weight })} />
-                  : <Stepper value={v.qty || 0} step={1} onChange={(qty) => setItem(c.id, { qty })} />}
+                {!added
+                  ? <Button sm variant="ghost" onClick={() => setItem(c.id, c.unit === 'per_kg' ? { weight: 1 } : { qty: 1 })} style={{ whiteSpace: 'nowrap' }}>+ Add</Button>
+                  : <Button sm variant="navy" onClick={() => setItem(c.id, c.unit === 'per_kg' ? { weight: 0 } : { qty: 0 })} style={{ whiteSpace: 'nowrap' }}>✓ Added</Button>}
               </div>
+
+              <div className="cl-row" style={{ gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
+                {(CATEGORY_CHIPS[c.category] || []).map((t) => <Chip key={t} variant="gray">{t}</Chip>)}
+              </div>
+              <div className="cl-muted" style={{ fontSize: 12, marginTop: 8 }}>{CATEGORY_DESC[c.category]}</div>
+
+              {added && <>
+                <div className="cl-between" style={{ marginTop: 12 }}>
+                  {c.unit === 'per_kg'
+                    ? <Stepper value={v.weight || 0} step={0.5} unit="kg" onChange={(weight) => setItem(c.id, { weight })} />
+                    : <Stepper value={v.qty || 0} step={1} onChange={(qty) => setItem(c.id, { qty })} />}
+                  <button onClick={() => setNoteOpen((s) => ({ ...s, [c.id]: !s[c.id] }))} style={{ fontSize: 12, fontWeight: 700, color: 'var(--navy)' }}>Any special requests?</button>
+                </div>
+                {noteOpen[c.id] && (
+                  <input className="cl-field" style={{ marginTop: 10 }} placeholder={`Notes for ${c.name}…`}
+                    value={v.note || ''} onChange={(e) => setItem(c.id, { note: e.target.value })} />
+                )}
+              </>}
             </Card>
           );
         })}
-        <Button variant="lime" disabled={!items.length} onClick={() => setStep(2)} style={{ marginTop: 8 }}>Continue</Button>
+        <Button variant="lime" disabled={!items.length} onClick={() => setStep(2)} style={{ marginTop: 8 }}>Next</Button>
       </>}
 
       {step === 2 && <>
@@ -593,21 +740,39 @@ function OrderFlow({ open, onClose, onPlaced, summary }) {
 
       {step === 3 && <>
         {!quote ? <Loading /> : <>
+          <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 12 }}>Pay now (incl. tax)</div>
           <Card style={{ marginBottom: 14 }}>
-            <div className="cl-eyebrow" style={{ marginBottom: 10 }}>Order summary</div>
             <Line l="Subtotal" v={fmt.money(quote.subtotal_cents)} />
             <Line l="Service fee" v={quote.platform_fee_cents ? fmt.money(quote.platform_fee_cents) : 'WAIVED'} />
-            <Line l="Delivery" v={quote.delivery_fee_cents ? fmt.money(quote.delivery_fee_cents) : 'FREE'} />
+            <Line l="Collection & Delivery" v={quote.delivery_fee_cents ? fmt.money(quote.delivery_fee_cents) : 'FREE'} />
             {quote.credit_applied_cents > 0 && <Line l="Wallet credit" v={`– ${fmt.money(quote.credit_applied_cents)}`} green />}
+            {tipCents > 0 && <Line l="Driver tip" v={fmt.money(tipCents)} />}
+            <button onClick={() => setChargesInfoOpen((x) => !x)} style={{ fontSize: 12, fontWeight: 700, color: 'var(--navy)', marginTop: 8 }}>How charges work?</button>
+            {chargesInfoOpen && (
+              <div className="cl-muted" style={{ fontSize: 12, marginTop: 8, lineHeight: 1.5 }}>
+                Priced per kg or item at checkout. The service fee covers collection & delivery — waived automatically on Plus/Pro. Wallet credit is applied before your card is charged.
+              </div>
+            )}
             <div className="cl-divider" />
-            <Line l={<b>Total today</b>} v={<b>{fmt.money(quote.total_cents)}</b>} />
+            <Line l={<b>Total today</b>} v={<b>{fmt.money(quote.total_cents + tipCents)}</b>} />
           </Card>
+
           <Card style={{ marginBottom: 14 }} onClick={() => setUseCredit((x) => !x)}>
             <div className="cl-between"><span style={{ fontWeight: 700 }}>Use wallet credit ({fmt.money(summary?.balance_cents)})</span>
               <span style={{ width: 44, height: 26, borderRadius: 999, background: useCredit ? 'var(--lime)' : 'var(--gray3)', position: 'relative', transition: '.2s' }}>
                 <span style={{ position: 'absolute', top: 3, left: useCredit ? 21 : 3, width: 20, height: 20, borderRadius: 20, background: '#fff', transition: '.2s' }} /></span>
             </div>
           </Card>
+
+          <Card style={{ marginBottom: 14 }}>
+            <div className="cl-eyebrow" style={{ marginBottom: 10 }}>Tip your driver?</div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {[0, 200, 400, 1000].map((amt) => (
+                <Button key={amt} sm variant={tipCents === amt ? 'lime' : 'ghost'} onClick={() => setTipCents(amt)} style={{ flex: 1 }}>{amt === 0 ? 'No' : fmt.money(amt)}</Button>
+              ))}
+            </div>
+          </Card>
+
           <Card style={{ marginBottom: 14 }}>
             <div className="cl-between" onClick={() => setRepeat((x) => !x)} style={{ cursor: 'pointer' }}>
               <span style={{ fontWeight: 700 }}>🔁 Repeat this order</span>
@@ -622,10 +787,30 @@ function OrderFlow({ open, onClose, onPlaced, summary }) {
               </div>
             )}
           </Card>
-          <div style={{ display: 'flex', gap: 10 }}>
+
+          {!summary?.subscription && plans.filter((p) => p.price_cents > 0).map((p) => (
+            <Card key={p.id} onClick={() => setUpsellPlan((x) => (x === p.id ? null : p.id))}
+              style={{ marginBottom: 10, border: upsellPlan === p.id ? '2px solid var(--navy)' : '2px solid transparent', cursor: 'pointer' }}>
+              <div className="cl-row" style={{ gap: 12 }}>
+                <span style={{ width: 20, height: 20, borderRadius: 20, border: '2px solid var(--navy)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  {upsellPlan === p.id && <span style={{ width: 10, height: 10, borderRadius: 10, background: 'var(--navy)' }} />}
+                </span>
+                <div style={{ flex: 1 }}>
+                  <div className="cl-between"><b>ChaseLaundry {p.name}</b><span style={{ fontWeight: 800 }}>{fmt.money(p.price_cents)}/mo</span></div>
+                  <div className="cl-muted" style={{ fontSize: 12, marginTop: 2 }}>{p.perks[0]}</div>
+                </div>
+              </div>
+            </Card>
+          ))}
+
+          <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
             <Button variant="ghost" onClick={() => setStep(2)}>Back</Button>
-            <Button variant="lime" disabled={placing} onClick={place}>{placing ? 'Placing…' : 'Place order'}</Button>
+            <Button variant="lime" disabled={placing} onClick={placeWithUpsell}>{placing ? 'Placing…' : `Pay now ${fmt.money(quote.total_cents + tipCents)}`}</Button>
           </div>
+
+          <PaymentSheet open={!!payPlan} onClose={() => setPayPlan(null)} amountCents={payPlan?.price_cents || 0}
+            recurring cta="Subscribe & pay" title={payPlan ? `Subscribe to ${payPlan.name}` : ''} description={payPlan ? `${payPlan.name} plan` : ''}
+            onAuthorized={async () => { await activatePlan(payPlan.id); setPayPlan(null); await place(); }} />
         </>}
       </>}
     </Sheet>
@@ -669,6 +854,59 @@ function AddAddress({ customerId, onSaved, onCancel }) {
           <Button sm variant="lime" disabled={saving} onClick={save} style={{ flex: 1 }}>{saving ? 'Saving…' : 'Save address'}</Button>
         </div>
       </>}
+    </Card>
+  );
+}
+
+// a saved address row: view mode (set default / edit) or inline edit mode
+function AddressRow({ a, onReload }) {
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [form, setForm] = useState({ label: a.label, type: a.type, line1: a.line1, line2: a.line2 || '', city: a.city, postcode: a.postcode });
+
+  const setDefault = async () => {
+    setBusy(true);
+    await api.post(`/api/customers/${CUSTOMER_ID}/addresses/${a.id}/default`);
+    setBusy(false); onReload?.();
+  };
+
+  const save = async () => {
+    setBusy(true);
+    await api.post(`/api/customers/${CUSTOMER_ID}/addresses/${a.id}`, form);
+    setBusy(false); setEditing(false); onReload?.();
+  };
+
+  if (editing) {
+    return (
+      <Card style={{ marginBottom: 10, background: 'var(--light)' }}>
+        <div className="cl-row" style={{ gap: 8, marginBottom: 10 }}>
+          {Object.entries(ADDRESS_TYPES).map(([k, t]) => (
+            <button key={k} onClick={() => setForm((f) => ({ ...f, type: k }))} style={{ flex: 1, padding: '9px 0', borderRadius: 10, fontWeight: 700, fontSize: 12, border: form.type === k ? '2px solid var(--navy)' : '1.5px solid var(--gray3)', background: form.type === k ? 'var(--navy)' : '#fff', color: form.type === k ? '#fff' : 'var(--gray)' }}>{t.icon} {t.label}</button>
+          ))}
+        </div>
+        {form.type === 'other' && <input className="cl-field" placeholder="Label" value={form.label} onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))} style={{ marginBottom: 10 }} />}
+        <input className="cl-field" placeholder="Address line 1" value={form.line1} onChange={(e) => setForm((f) => ({ ...f, line1: e.target.value }))} style={{ marginBottom: 10 }} />
+        <input className="cl-field" placeholder="Address line 2 (unit no., etc.)" value={form.line2} onChange={(e) => setForm((f) => ({ ...f, line2: e.target.value }))} style={{ marginBottom: 10 }} />
+        <div className="cl-row" style={{ gap: 8, marginBottom: 12 }}>
+          <input className="cl-field" placeholder="City" value={form.city} onChange={(e) => setForm((f) => ({ ...f, city: e.target.value }))} />
+          <input className="cl-field" placeholder="Postcode" value={form.postcode} onChange={(e) => setForm((f) => ({ ...f, postcode: e.target.value }))} />
+        </div>
+        <div className="cl-row" style={{ gap: 8 }}>
+          <Button sm variant="ghost" onClick={() => setEditing(false)} style={{ flex: 1 }}>Cancel</Button>
+          <Button sm variant="lime" disabled={busy} onClick={save} style={{ flex: 1 }}>{busy ? 'Saving…' : 'Save'}</Button>
+        </div>
+      </Card>
+    );
+  }
+
+  return (
+    <Card style={{ marginBottom: 10 }}>
+      <div style={{ fontWeight: 700 }}>{ADDRESS_TYPES[a.type]?.icon || '📍'} {a.label} {a.is_default ? <Chip variant="gray">default</Chip> : null}</div>
+      <div className="cl-muted" style={{ fontSize: 13, marginTop: 2 }}>{a.line1}, {a.city} {a.postcode}</div>
+      <div className="cl-row" style={{ gap: 16, marginTop: 10 }}>
+        {!a.is_default && <button onClick={setDefault} disabled={busy} style={{ fontSize: 12, fontWeight: 700, color: 'var(--navy)' }}>{busy ? 'Setting…' : 'Set as default'}</button>}
+        <button onClick={() => setEditing(true)} style={{ fontSize: 12, fontWeight: 700, color: 'var(--navy)' }}>Edit</button>
+      </div>
     </Card>
   );
 }
@@ -884,7 +1122,56 @@ function Chat({ threadId, onBack }) {
 }
 
 // ─────────────────────────────────────── ACCOUNT (profile + subscriptions)
-function Account({ summary, onReload }) {
+// profile card: view mode, or inline edit of name + mobile number (email can't change here)
+function ProfileCard({ user, onReload }) {
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [name, setName] = useState(user.name);
+  const [phone, setPhone] = useState(user.phone || '');
+
+  const save = async () => {
+    setBusy(true);
+    await api.post(`/api/customers/${CUSTOMER_ID}/profile`, { name: name.trim(), phone: phone.trim() });
+    setBusy(false); setEditing(false); onReload?.();
+  };
+
+  if (editing) {
+    return (
+      <Card style={{ marginBottom: 16 }}>
+        <div className="cl-row" style={{ gap: 14, marginBottom: 14 }}>
+          <Avatar name={name || user.name} size={52} />
+          <div style={{ flex: 1 }}>
+            <input className="cl-field" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} style={{ marginBottom: 8 }} />
+            <input className="cl-field" placeholder="Mobile number" value={phone} onChange={(e) => setPhone(e.target.value)} />
+          </div>
+        </div>
+        <div className="cl-muted" style={{ fontSize: 12, marginBottom: 12 }}>Email: {user.email} <span style={{ fontStyle: 'italic' }}>(can't be changed)</span></div>
+        <div className="cl-row" style={{ gap: 8 }}>
+          <Button sm variant="ghost" onClick={() => { setName(user.name); setPhone(user.phone || ''); setEditing(false); }} style={{ flex: 1 }}>Cancel</Button>
+          <Button sm variant="lime" disabled={busy || !name.trim()} onClick={save} style={{ flex: 1 }}>{busy ? 'Saving…' : 'Save'}</Button>
+        </div>
+      </Card>
+    );
+  }
+
+  return (
+    <Card style={{ marginBottom: 16 }}>
+      <div className="cl-between">
+        <div className="cl-row" style={{ gap: 14 }}>
+          <Avatar name={user.name} size={52} />
+          <div>
+            <div style={{ fontWeight: 900, fontSize: 18 }}>{user.name}</div>
+            <div className="cl-muted" style={{ fontSize: 13 }}>{user.email}</div>
+            {user.phone && <div className="cl-muted" style={{ fontSize: 13 }}>{user.phone}</div>}
+          </div>
+        </div>
+        <button onClick={() => setEditing(true)} style={{ fontSize: 12, fontWeight: 700, color: 'var(--navy)', flexShrink: 0 }}>Edit</button>
+      </div>
+    </Card>
+  );
+}
+
+function Account({ summary, onReload, onTab, openOrders = 0 }) {
   const [plans, setPlans] = useState([]);
   const [payPlan, setPayPlan] = useState(null); // paid plan awaiting card auth
   const [addingAddr, setAddingAddr] = useState(false);
@@ -903,11 +1190,17 @@ function Account({ summary, onReload }) {
 
   return (
     <div style={{ padding: 18 }}>
-      <Card style={{ marginBottom: 16 }}>
-        <div className="cl-row" style={{ gap: 14 }}>
-          <Avatar name={summary.user.name} size={52} />
-          <div><div style={{ fontWeight: 900, fontSize: 18 }}>{summary.user.name}</div><div className="cl-muted" style={{ fontSize: 13 }}>{summary.user.email}</div></div>
-        </div>
+      <ProfileCard user={summary.user} onReload={onReload} />
+
+      <Card style={{ marginBottom: 16, padding: 0, overflow: 'hidden' }}>
+        <button onClick={() => onTab?.('orders')} className="cl-between" style={{ width: '100%', padding: '14px 18px', borderBottom: '1px solid var(--gray3)' }}>
+          <span className="cl-row" style={{ gap: 10, fontWeight: 700 }}><span style={{ fontSize: 18 }}>📦</span>Order history</span>
+          <span className="cl-row" style={{ gap: 8 }}>{openOrders > 0 ? <Chip variant="navy">{openOrders} active</Chip> : null}<span style={{ color: 'var(--gray2)' }}>›</span></span>
+        </button>
+        <button onClick={() => onTab?.('support')} className="cl-between" style={{ width: '100%', padding: '14px 18px' }}>
+          <span className="cl-row" style={{ gap: 10, fontWeight: 700 }}><span style={{ fontSize: 18 }}>💬</span>Help & Support</span>
+          <span style={{ color: 'var(--gray2)' }}>›</span>
+        </button>
       </Card>
 
       {summary.subscription && (
@@ -938,7 +1231,7 @@ function Account({ summary, onReload }) {
       </div>
       {addingAddr && <AddAddress customerId={CUSTOMER_ID} onSaved={() => { setAddingAddr(false); onReload(); }} onCancel={() => setAddingAddr(false)} />}
       {summary.addresses.map((a) => (
-        <Card key={a.id} style={{ marginBottom: 10 }}><div style={{ fontWeight: 700 }}>{ADDRESS_TYPES[a.type]?.icon || '📍'} {a.label} {a.is_default ? <Chip variant="gray">default</Chip> : null}</div><div className="cl-muted" style={{ fontSize: 13 }}>{a.line1}, {a.city} {a.postcode}</div></Card>
+        <AddressRow key={a.id} a={a} onReload={onReload} />
       ))}
 
       <div style={{ marginTop: 20 }}>

@@ -290,6 +290,7 @@ function migrateOrders() {
   const cols = db.prepare('PRAGMA table_info(orders)').all().map((c) => c.name);
   if (!cols.includes('handover')) db.exec('ALTER TABLE orders ADD COLUMN handover TEXT');           // hand_to_me | leave_at_door | someone_else
   if (!cols.includes('handover_contact')) db.exec('ALTER TABLE orders ADD COLUMN handover_contact TEXT'); // name/phone when someone_else
+  if (!cols.includes('tip_cents')) db.exec('ALTER TABLE orders ADD COLUMN tip_cents INTEGER DEFAULT 0'); // driver tip, chosen at checkout
 
   const acols = db.prepare('PRAGMA table_info(addresses)').all().map((c) => c.name);
   if (!acols.includes('type')) db.exec("ALTER TABLE addresses ADD COLUMN type TEXT DEFAULT 'home'"); // home | work | other
