@@ -1,20 +1,23 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
-  api, fmt, getSocket, useSocket, STATUS_FLOW, STATUS_LABEL, GARMENT_LABEL, HANDOVER, TICKET_CATEGORIES, REPEAT_CADENCE, nextRepeatDue,
-  StatusPill, OneMap, GarmentJourney, Avatar, Empty, PaymentSheet, TopUpSheet, topupBonus, distKm, etaMins, printInvoice,
+  api, fmt, getSocket, useSocket, STATUS_FLOW, STATUS_LABEL, GARMENT_LABEL, HANDOVER, ADDRESS_TYPES, TICKET_CATEGORIES, REPEAT_CADENCE, nextRepeatDue,
+  StatusPill, OneMap, GarmentJourney, Avatar, Empty, Card, Button, Chip, PlacesAutocomplete, PaymentSheet, TopUpSheet, topupBonus, distKm, etaMins, printInvoice,
 } from '@shared';
 import { customerId, logout } from '../auth.js';
 
 const CUSTOMER_ID = customerId();
 
 export default function Account({ initialTab = 'orders' }) {
-  const [tab, setTab] = useState(initialTab);
+  const location = useLocation();
+  const queryTab = new URLSearchParams(location.search).get('tab');
+  const [tab, setTab] = useState(queryTab || initialTab);
+  useEffect(() => { if (queryTab) setTab(queryTab); }, [queryTab]);
   const [summary, setSummary] = useState(null);
   const load = useCallback(() => api.get(`/api/customers/${CUSTOMER_ID}/summary`).then(setSummary), []);
   useEffect(() => { load(); }, [load]);
 
-  const tabs = [['orders', 'Orders & tracking'], ['wallet', 'Wallet'], ['subscription', 'Subscription'], ['support', 'Support']];
+  const tabs = [['orders', 'Orders & tracking'], ['wallet', 'Wallet'], ['packs', 'Prepaid packs'], ['subscription', 'Subscription'], ['support', 'Support']];
   return (
     <div className="app-page">
       <div className="web-wrap">
@@ -32,7 +35,10 @@ export default function Account({ initialTab = 'orders' }) {
           {tabs.map(([k, l]) => <button key={k} className={tab === k ? 'active' : ''} onClick={() => setTab(k)}>{l}</button>)}
         </div>
         {tab === 'orders' && <Orders />}
+        {tab === 'repeat' && <RepeatOrders />}
+        {tab === 'profile' && <ProfileTab summary={summary} onReload={load} />}
         {tab === 'wallet' && <Wallet onReload={load} />}
+        {tab === 'packs' && <Packs />}
         {tab === 'subscription' && <Subscription summary={summary} onReload={load} />}
         {tab === 'support' && <Support />}
       </div>
@@ -192,6 +198,174 @@ function OrderDetail({ orderId }) {
   );
 }
 
+// ───────── REPEAT ORDERS (orders with the "repeat this order" checkout toggle set)
+function RepeatOrders() {
+  const nav = useNavigate();
+  const [orders, setOrders] = useState([]);
+  useEffect(() => { api.get(`/api/customers/${CUSTOMER_ID}/orders`).then(setOrders); }, []);
+  const repeaters = orders.filter((o) => o.repeat_requested);
+
+  return (
+    <div style={{ maxWidth: 640 }}>
+      {repeaters.length === 0 ? (
+        <div className="panel"><Empty icon="🔁" title="No repeat orders set up" sub="Toggle “Repeat this order” at checkout to schedule a standing pickup" /></div>
+      ) : repeaters.map((o) => {
+        const due = nextRepeatDue(o);
+        const dueNow = due && due <= new Date();
+        return (
+          <div key={o.id} className="panel" style={{ marginBottom: 14 }}>
+            <div className="cl-between">
+              <div>
+                <b>{o.code}</b>
+                <div className="cl-muted" style={{ fontSize: 13, marginTop: 2 }}>{REPEAT_CADENCE[o.repeat_cadence]?.label || 'Repeat'} · {o.items?.length || 0} item(s)</div>
+              </div>
+              <StatusPill status={o.status} label={o.status_label} />
+            </div>
+            <div className="cl-between" style={{ marginTop: 14 }}>
+              <button className="cl-btn cl-btn-ghost cl-btn-sm" style={{ width: 'auto' }} onClick={() => nav('/account?tab=orders')}>View order ›</button>
+              {dueNow && <button className="cl-btn cl-btn-lime cl-btn-sm" style={{ width: 'auto' }} onClick={() => nav('/order')}>Schedule next</button>}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ───────── ACCOUNT (profile + addresses)
+function ProfileTab({ summary, onReload }) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [addingAddr, setAddingAddr] = useState(false);
+
+  useEffect(() => { if (summary) { setName(summary.user.name); setPhone(summary.user.phone || ''); } }, [summary]);
+
+  if (!summary) return <div className="panel">Loading…</div>;
+
+  const save = async () => {
+    setBusy(true);
+    await api.post(`/api/customers/${CUSTOMER_ID}/profile`, { name, phone });
+    setBusy(false); setEditing(false); onReload();
+  };
+
+  return (
+    <div style={{ maxWidth: 640 }}>
+      <div className="panel" style={{ marginBottom: 24 }}>
+        {!editing ? (
+          <div className="cl-between">
+            <div className="cl-row" style={{ gap: 14 }}>
+              <Avatar name={summary.user.name} size={48} />
+              <div>
+                <div style={{ fontWeight: 900, fontSize: 18 }}>{summary.user.name}</div>
+                <div className="cl-muted" style={{ fontSize: 13 }}>{summary.user.email}</div>
+                {summary.user.phone && <div className="cl-muted" style={{ fontSize: 13 }}>{summary.user.phone}</div>}
+              </div>
+            </div>
+            <button className="cl-btn cl-btn-ghost cl-btn-sm" style={{ width: 'auto' }} onClick={() => setEditing(true)}>Edit</button>
+          </div>
+        ) : (
+          <div>
+            <label className="cl-label">Name</label>
+            <input className="cl-field" style={{ width: '100%', marginBottom: 12 }} value={name} onChange={(e) => setName(e.target.value)} />
+            <label className="cl-label">Phone</label>
+            <input className="cl-field" style={{ width: '100%', marginBottom: 16 }} value={phone} onChange={(e) => setPhone(e.target.value)} />
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button className="cl-btn cl-btn-ghost" style={{ width: 'auto' }} onClick={() => setEditing(false)}>Cancel</button>
+              <Button variant="lime" disabled={busy || !name.trim()} onClick={save}>{busy ? 'Saving…' : 'Save'}</Button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="cl-between" style={{ marginBottom: 14 }}>
+        <div className="cl-eyebrow">Addresses</div>
+        <button className="cl-btn cl-btn-ghost cl-btn-sm" style={{ width: 'auto' }} onClick={() => setAddingAddr((x) => !x)}>{addingAddr ? 'Cancel' : '+ Add address'}</button>
+      </div>
+      {addingAddr && <AddAddressPanel onSaved={() => { setAddingAddr(false); onReload(); }} />}
+      {summary.addresses.map((a) => <AddressRow key={a.id} a={a} onReload={onReload} />)}
+    </div>
+  );
+}
+
+function AddAddressPanel({ onSaved }) {
+  const [place, setPlace] = useState(null);
+  const [type, setType] = useState('home');
+  const [label, setLabel] = useState('');
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    setBusy(true);
+    const a = await api.post(`/api/customers/${CUSTOMER_ID}/addresses`, {
+      type, label: label.trim() || ADDRESS_TYPES[type].label, line1: place.line1, line2: '', city: 'Singapore', postcode: place.postcode, lat: place.lat, lng: place.lng, make_default: true,
+    });
+    setBusy(false); onSaved(a);
+  };
+  return (
+    <div className="panel" style={{ marginBottom: 16, background: 'var(--light)' }}>
+      {!place ? <PlacesAutocomplete autoFocus onSelect={setPlace} placeholder="Search address or postcode…" /> : (
+        <>
+          <div className="cl-between" style={{ marginBottom: 12 }}>
+            <div><b>📍 {place.name}</b><div className="cl-muted" style={{ fontSize: 13 }}>{place.line1} · {place.postcode}</div></div>
+            <button onClick={() => setPlace(null)} style={{ fontSize: 13, fontWeight: 700, color: 'var(--navy)' }}>Change</button>
+          </div>
+          <div className="cl-label">Address type</div>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+            {Object.entries(ADDRESS_TYPES).map(([k, t]) => (
+              <button key={k} onClick={() => setType(k)} style={{ flex: 1, padding: '10px 0', borderRadius: 10, fontWeight: 700, fontSize: 13, border: type === k ? '2px solid var(--navy)' : '1.5px solid var(--gray3)', background: type === k ? 'var(--navy)' : '#fff', color: type === k ? '#fff' : 'var(--gray)' }}>{t.icon} {t.label}</button>
+            ))}
+          </div>
+          {type === 'other' && <input className="cl-field" style={{ width: '100%', marginBottom: 12 }} placeholder="Label (e.g. Mum's place, Gym)" value={label} onChange={(e) => setLabel(e.target.value)} />}
+          <Button variant="lime" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save address'}</Button>
+        </>
+      )}
+    </div>
+  );
+}
+
+function AddressRow({ a, onReload }) {
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [form, setForm] = useState({ label: a.label, type: a.type, line1: a.line1, line2: a.line2 || '', city: a.city, postcode: a.postcode });
+
+  const setDefault = async () => { setBusy(true); await api.post(`/api/customers/${CUSTOMER_ID}/addresses/${a.id}/default`); setBusy(false); onReload(); };
+  const save = async () => { setBusy(true); await api.post(`/api/customers/${CUSTOMER_ID}/addresses/${a.id}`, form); setBusy(false); setEditing(false); onReload(); };
+
+  if (editing) {
+    return (
+      <div className="panel" style={{ marginBottom: 12, background: 'var(--light)' }}>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+          {Object.entries(ADDRESS_TYPES).map(([k, t]) => (
+            <button key={k} onClick={() => setForm((f) => ({ ...f, type: k }))} style={{ flex: 1, padding: '9px 0', borderRadius: 10, fontWeight: 700, fontSize: 12, border: form.type === k ? '2px solid var(--navy)' : '1.5px solid var(--gray3)', background: form.type === k ? 'var(--navy)' : '#fff', color: form.type === k ? '#fff' : 'var(--gray)' }}>{t.icon} {t.label}</button>
+          ))}
+        </div>
+        {form.type === 'other' && <input className="cl-field" style={{ width: '100%', marginBottom: 10 }} placeholder="Label" value={form.label} onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))} />}
+        <input className="cl-field" style={{ width: '100%', marginBottom: 10 }} placeholder="Address line 1" value={form.line1} onChange={(e) => setForm((f) => ({ ...f, line1: e.target.value }))} />
+        <input className="cl-field" style={{ width: '100%', marginBottom: 10 }} placeholder="Address line 2 (unit no., etc.)" value={form.line2} onChange={(e) => setForm((f) => ({ ...f, line2: e.target.value }))} />
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+          <input className="cl-field" placeholder="City" value={form.city} onChange={(e) => setForm((f) => ({ ...f, city: e.target.value }))} />
+          <input className="cl-field" placeholder="Postcode" value={form.postcode} onChange={(e) => setForm((f) => ({ ...f, postcode: e.target.value }))} />
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="cl-btn cl-btn-ghost" style={{ width: 'auto' }} onClick={() => setEditing(false)}>Cancel</button>
+          <Button variant="lime" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save'}</Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="panel" style={{ marginBottom: 12 }}>
+      <div style={{ fontWeight: 700 }}>{ADDRESS_TYPES[a.type]?.icon || '📍'} {a.label} {a.is_default ? <Chip variant="gray">default</Chip> : null}</div>
+      <div className="cl-muted" style={{ fontSize: 13, marginTop: 4 }}>{a.line1}, {a.city} {a.postcode}</div>
+      <div style={{ display: 'flex', gap: 16, marginTop: 10 }}>
+        {!a.is_default && <button onClick={setDefault} disabled={busy} style={{ fontSize: 13, fontWeight: 700, color: 'var(--navy)' }}>{busy ? 'Setting…' : 'Set as default'}</button>}
+        <button onClick={() => setEditing(true)} style={{ fontSize: 13, fontWeight: 700, color: 'var(--navy)' }}>Edit</button>
+      </div>
+    </div>
+  );
+}
+
 // ───────── WALLET
 function Wallet({ onReload }) {
   const [data, setData] = useState(null);
@@ -262,6 +436,104 @@ function Subscription({ summary, onReload }) {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// ───────── PREPAID PACKS (quantity-based, separate from the dollar-credit wallet)
+function Packs() {
+  const [data, setData] = useState(null);
+  const [tab, setTab] = useState('shop');
+  const [buying, setBuying] = useState(null); // { catalog_id, name, unit, tier }
+  const [payAmount, setPayAmount] = useState(0);
+
+  const load = useCallback(() => api.get(`/api/customers/${CUSTOMER_ID}/packs`).then(setData), []);
+  useEffect(() => { load(); }, [load]);
+  if (!data) return <div className="panel">Loading…</div>;
+
+  const buy = async () => {
+    await api.post(`/api/customers/${CUSTOMER_ID}/packs`, { catalog_id: buying.catalog_id, qty: buying.tier.qty });
+    setBuying(null); setPayAmount(0); await load();
+  };
+
+  return (
+    <div>
+      <div className="tabs" style={{ marginBottom: 20 }}>
+        <button className={tab === 'shop' ? 'active' : ''} onClick={() => setTab('shop')}>Shop</button>
+        <button className={tab === 'mine' ? 'active' : ''} onClick={() => setTab('mine')}>My packs ({data.owned.length})</button>
+      </div>
+
+      {tab === 'shop' ? (
+        <div className="two-col">
+          <div>
+            {data.offers.map((o) => (
+              <div key={o.catalog_id} className="panel" style={{ marginBottom: 16 }}>
+                <div className="cl-row" style={{ gap: 10, marginBottom: 14 }}>
+                  <span style={{ fontSize: 24 }}>{o.icon}</span>
+                  <div style={{ fontWeight: 800, fontSize: 17 }}>{o.name} pack</div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+                  {o.tiers.map((t) => (
+                    <div key={t.qty} style={{ border: '1.5px solid var(--gray3)', borderRadius: 12, padding: 14 }}>
+                      <div style={{ fontWeight: 800, fontSize: 15 }}>{t.qty}{o.unit === 'per_kg' ? 'kg' : ' items'}</div>
+                      <Chip variant="navy">{t.discount_pct}% off</Chip>
+                      <div style={{ marginTop: 8, fontWeight: 900, fontSize: 16 }}>{fmt.money(t.price_cents)}</div>
+                      <Button sm variant="navy" style={{ marginTop: 8, width: '100%' }} onClick={() => setBuying({ catalog_id: o.catalog_id, name: o.name, unit: o.unit, tier: t })}>View offer</Button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="panel" style={{ background: 'var(--lime-pale)' }}>
+            <b>How to save with prepaid packs?</b>
+            <p className="cl-muted" style={{ fontSize: 13, marginTop: 8 }}>Prepay for a bundle of your favourite laundry service and enjoy a lower per-kg or per-item rate on future orders. Packs are valid for {data.expiry_days} days.</p>
+          </div>
+        </div>
+      ) : (
+        data.owned.length === 0 ? <div className="panel"><Empty icon="📦" title="No prepaid packs yet" sub="Buy a pack from the Shop tab to save on your frequent services" /></div> :
+        <div>
+          {data.owned.map((p) => {
+            const remaining = Math.max(0, p.quantity_total - p.quantity_used);
+            const expired = new Date(p.expires_at) < new Date();
+            return (
+              <div key={p.id} className="panel" style={{ marginBottom: 12 }}>
+                <div className="cl-between">
+                  <div className="cl-row" style={{ gap: 10 }}>
+                    <span style={{ fontSize: 20 }}>{p.icon}</span>
+                    <div>
+                      <div style={{ fontWeight: 800 }}>{p.name}</div>
+                      <div className="cl-muted" style={{ fontSize: 13 }}>{remaining}{p.unit === 'per_kg' ? 'kg' : ' items'} left · expires {fmt.date(p.expires_at)}</div>
+                    </div>
+                  </div>
+                  <Chip variant={expired || remaining <= 0 ? 'gray' : 'navy'}>{expired ? 'expired' : remaining <= 0 ? 'used up' : 'active'}</Chip>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {buying && payAmount === 0 && (
+        <div onClick={() => setBuying(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(22,32,64,.45)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+          <div onClick={(e) => e.stopPropagation()} className="panel" style={{ width: '100%', maxWidth: 420 }}>
+            <div style={{ fontWeight: 900, fontSize: 17, marginBottom: 14 }}>{buying.name} pack</div>
+            <div className="cl-between" style={{ padding: '4px 0' }}><span className="cl-muted">Quantity</span><span>{buying.tier.qty}{buying.unit === 'per_kg' ? 'kg' : ' items'}</span></div>
+            <div className="cl-between" style={{ padding: '4px 0' }}><span className="cl-muted">Discount</span><span style={{ color: 'var(--ok)' }}>{buying.tier.discount_pct}% off</span></div>
+            <div className="cl-between" style={{ padding: '4px 0' }}><span className="cl-muted">Valid for</span><span>{data.expiry_days} days</span></div>
+            <div className="cl-divider" />
+            <div className="cl-between" style={{ marginBottom: 14 }}><b>Price</b><b>{fmt.money(buying.tier.price_cents)}</b></div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button className="cl-btn cl-btn-ghost" style={{ width: 'auto' }} onClick={() => setBuying(null)}>Cancel</button>
+              <Button variant="lime" onClick={() => setPayAmount(buying.tier.price_cents)}>Buy for {fmt.money(buying.tier.price_cents)}</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <PaymentSheet open={payAmount > 0} onClose={() => setPayAmount(0)} amountCents={payAmount} cta="Buy pack"
+        title={buying ? `Buy ${buying.name} pack` : ''} description={buying ? `${buying.tier.qty}${buying.unit === 'per_kg' ? 'kg' : ' items'}` : ''}
+        onAuthorized={buy} />
     </div>
   );
 }

@@ -117,12 +117,23 @@ export function BottomNav({ tabs, active, onChange }) {
   );
 }
 
-// full-screen panel that slides in from the right (LaundryHeap-style "push" navigation),
-// and slides back out the same way on close instead of just vanishing.
+// full-screen panel that slides in from the right (LaundryHeap-style "push" navigation) on
+// narrow/phone-width viewports, and slides back out the same way on close instead of just
+// vanishing. On wide (desktop web) viewports it renders as a centered modal card instead —
+// an edge-anchored full-height drawer looks like a mobile app bug on a wide browser window.
 const SHEET_ANIM_MS = 220;
 export function Sheet({ open, onClose, title, children }) {
   const [mounted, setMounted] = useState(open);
   const [closing, setClosing] = useState(false);
+  const [wide, setWide] = useState(() => typeof window !== 'undefined' && window.innerWidth >= 860);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mq = window.matchMedia('(min-width: 860px)');
+    const onChange = (e) => setWide(e.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
 
   useEffect(() => {
     if (open) { setMounted(true); setClosing(false); return; }
@@ -135,6 +146,30 @@ export function Sheet({ open, onClose, title, children }) {
   }, [open]);
 
   if (!mounted) return null;
+
+  if (wide) {
+    const anim = closing ? 'clModalOut' : 'clModalIn';
+    return (
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(22,32,64,.45)', zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, animation: `${closing ? 'clFadeOut' : 'clFadeIn'} ${SHEET_ANIM_MS}ms ease` }}>
+        <div onClick={(e) => e.stopPropagation()} style={{ background: 'var(--light)', width: '100%', maxWidth: 480, maxHeight: '85vh', borderRadius: 18, overflow: 'hidden', boxShadow: '0 24px 60px rgba(0,0,0,.3)', display: 'flex', flexDirection: 'column', animation: `${anim} ${SHEET_ANIM_MS}ms ease forwards` }}>
+          <div className="cl-between" style={{ padding: '16px 20px 14px', background: '#fff', borderBottom: '1px solid var(--gray3)', flexShrink: 0 }}>
+            <div style={{ fontSize: 16, fontWeight: 800 }}>{title}</div>
+            <button onClick={onClose} style={{ fontSize: 22, color: 'var(--navy)' }}>×</button>
+          </div>
+          <div style={{ flex: 1, overflowY: 'auto', padding: 22 }}>
+            {children}
+          </div>
+        </div>
+        <style>{`
+          @keyframes clModalIn{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:scale(1)}}
+          @keyframes clModalOut{from{opacity:1;transform:scale(1)}to{opacity:0;transform:scale(.96)}}
+          @keyframes clFadeIn{from{opacity:0}to{opacity:1}}
+          @keyframes clFadeOut{from{opacity:1}to{opacity:0}}
+        `}</style>
+      </div>
+    );
+  }
+
   const anim = closing ? 'clSlideOut' : 'clSlideIn';
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(22,32,64,.45)', zIndex: 50, display: 'flex', justifyContent: 'center', animation: `${closing ? 'clFadeOut' : 'clFadeIn'} ${SHEET_ANIM_MS}ms ease` }}>

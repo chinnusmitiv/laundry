@@ -245,6 +245,20 @@ export function initSchema() {
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
   );
+
+  -- prepaid quantity packs (e.g. "30kg Wash & Fold pack") — separate from the dollar-credit wallet.
+  -- customer buys a fixed kg/item quantity at a discount; balance is drawn down as matching orders are placed.
+  CREATE TABLE IF NOT EXISTS packs (
+    id TEXT PRIMARY KEY,
+    customer_id TEXT NOT NULL REFERENCES users(id),
+    catalog_id TEXT NOT NULL REFERENCES catalog(id),
+    unit TEXT NOT NULL,             -- per_kg | per_item, mirrors catalog.unit at purchase time
+    quantity_total REAL NOT NULL,
+    quantity_used REAL NOT NULL DEFAULT 0,
+    price_cents INTEGER NOT NULL,
+    purchased_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+  );
   `);
 
   migrateAuth();
@@ -291,6 +305,7 @@ function migrateOrders() {
   if (!cols.includes('handover')) db.exec('ALTER TABLE orders ADD COLUMN handover TEXT');           // hand_to_me | leave_at_door | someone_else
   if (!cols.includes('handover_contact')) db.exec('ALTER TABLE orders ADD COLUMN handover_contact TEXT'); // name/phone when someone_else
   if (!cols.includes('tip_cents')) db.exec('ALTER TABLE orders ADD COLUMN tip_cents INTEGER DEFAULT 0'); // driver tip, chosen at checkout
+  if (!cols.includes('pack_credit_cents')) db.exec('ALTER TABLE orders ADD COLUMN pack_credit_cents INTEGER DEFAULT 0'); // value covered by a prepaid pack
 
   const acols = db.prepare('PRAGMA table_info(addresses)').all().map((c) => c.name);
   if (!acols.includes('type')) db.exec("ALTER TABLE addresses ADD COLUMN type TEXT DEFAULT 'home'"); // home | work | other

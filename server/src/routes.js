@@ -40,6 +40,43 @@ function topupBonus(amount) {
   return { bonus: 0, pct: 0 };
 }
 
+// prepaid quantity packs — buy a fixed kg/item quantity of a specific service at a discount, drawn down as orders are placed
+const PACK_TIERS = {
+  per_kg: [{ qty: 30, discount_pct: 12 }, { qty: 60, discount_pct: 18 }, { qty: 120, discount_pct: 24 }],
+  per_item: [{ qty: 20, discount_pct: 5 }, { qty: 50, discount_pct: 9 }, { qty: 100, discount_pct: 14 }],
+};
+const PACK_EXPIRY_DAYS = 90;
+const PACKABLE_ITEMS = ['Wash & Fold', 'Shirt — Dry Clean']; // curated: which catalog items offer packs
+
+// how much of `qty` (kg or item count) for this catalog item can be drawn from the customer's active packs
+function packCoverage(customerId, catalogId, qty) {
+  if (!customerId || !qty) return 0;
+  const rows = db.prepare('SELECT * FROM packs WHERE customer_id = ? AND catalog_id = ? AND expires_at > ? ORDER BY expires_at ASC').all(customerId, catalogId, now());
+  let remaining = qty, covered = 0;
+  for (const p of rows) {
+    const bal = p.quantity_total - p.quantity_used;
+    if (bal <= 0) continue;
+    const take = Math.min(bal, remaining);
+    covered += take; remaining -= take;
+    if (remaining <= 1e-9) break;
+  }
+  return covered;
+}
+// actually draw down `qty` from the customer's active packs for this catalog item (call once, at order creation)
+function consumePacks(customerId, catalogId, qty) {
+  if (!customerId || qty <= 0) return;
+  let remaining = qty;
+  const rows = db.prepare('SELECT * FROM packs WHERE customer_id = ? AND catalog_id = ? AND expires_at > ? ORDER BY expires_at ASC').all(customerId, catalogId, now());
+  for (const p of rows) {
+    if (remaining <= 1e-9) break;
+    const bal = p.quantity_total - p.quantity_used;
+    if (bal <= 0) continue;
+    const take = Math.min(bal, remaining);
+    db.prepare('UPDATE packs SET quantity_used = quantity_used + ? WHERE id = ?').run(take, p.id);
+    remaining -= take;
+  }
+}
+
 // ---- query helpers ----
 const getUser = (uid) => {
   const u = db.prepare('SELECT * FROM users WHERE id = ?').get(uid);
@@ -298,17 +335,20 @@ export function registerRoutes(app, io) {
     const paymentStatus = isB2B ? 'invoiced' : 'pending'; // B2B billed on terms, not pay-now
     const tipCents = isB2B ? 0 : Math.max(0, Math.round(tip_cents || 0));
     db.prepare(`INSERT INTO orders (id,code,customer_id,address_id,driver_id,facility_id,status,pickup_slot,return_slot,notes,handover,handover_contact,
-        subtotal_cents,platform_fee_cents,delivery_fee_cents,discount_cents,credit_applied_cents,tip_cents,total_cents,payment_status,repeat_requested,repeat_cadence,created_at,updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, ?, ?, ?, ?, ?)`)
+        subtotal_cents,platform_fee_cents,delivery_fee_cents,discount_cents,credit_applied_cents,pack_credit_cents,tip_cents,total_cents,payment_status,repeat_requested,repeat_cadence,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, ?, ?, ?, ?, ?)`)
       .run(oid, code, customer_id, address_id ?? null, driver_id ?? null, facility_id ?? null, status, pickup_slot ?? null, return_slot ?? null, notes || '', handover ?? null, handover_contact ?? null,
         pricing.subtotal_cents, pricing.platform_fee_cents, pricing.delivery_fee_cents,
-        pricing.discount_cents, pricing.credit_applied_cents, tipCents, pricing.total_cents + tipCents, paymentStatus, repeat_requested ? 1 : 0, repeat_requested ? (repeat_cadence || 'weekly') : null, now(), now());
+        pricing.discount_cents, pricing.credit_applied_cents, pricing.pack_credit_cents || 0, tipCents, pricing.total_cents + tipCents, paymentStatus, repeat_requested ? 1 : 0, repeat_requested ? (repeat_cadence || 'weekly') : null, now(), now());
     if (driver_id) io.to(`user:${driver_id}`).emit('job:assigned', fullOrder(oid));
     for (const it of items) {
       const cat = db.prepare('SELECT * FROM catalog WHERE id = ?').get(it.catalog_id);
-      const line = lineTotal(cat, it);
+      const qty = cat?.unit === 'per_kg' ? (it.weight_kg || 0) : (it.qty || 1);
+      const covered = (!isB2B && customer_id) ? packCoverage(customer_id, it.catalog_id, qty) : 0;
+      const line = lineTotal(cat, it, covered);
       db.prepare('INSERT INTO order_items (id,order_id,catalog_id,name,qty,weight_kg,price_cents) VALUES (?,?,?,?,?,?,?)')
         .run(id('itm'), oid, it.catalog_id, cat?.name || it.name, it.qty || 1, it.weight_kg || null, line);
+      if (covered > 0) consumePacks(customer_id, it.catalog_id, covered);
     }
     // consumer-only: spend wallet credit + push an in-app notification (business has no app)
     if (!isB2B) {
@@ -453,6 +493,41 @@ export function registerRoutes(app, io) {
     }
     notify({ io, userId: uid, type: 'payment', title: 'Wallet topped up 🎉', body: `S$${(amount / 100).toFixed(2)} added${bonus > 0 ? ` + S$${(bonus / 100).toFixed(2)} bonus credit` : ''}.` });
     res.json({ balance_cents: balanceOf(uid), added_cents: amount, bonus_cents: bonus });
+  });
+
+  // prepaid quantity packs — shop offers (curated catalog items) + this customer's owned packs
+  app.get('/api/customers/:id/packs', (req, res) => {
+    const uid = req.params.id;
+    const placeholders = PACKABLE_ITEMS.map(() => '?').join(',');
+    const catalog = db.prepare(`SELECT * FROM catalog WHERE scope = 'b2c' AND name IN (${placeholders})`).all(...PACKABLE_ITEMS);
+    const offers = catalog.map((c) => ({
+      catalog_id: c.id, name: c.name, icon: c.icon, unit: c.unit, base_price_cents: c.price_cents,
+      tiers: PACK_TIERS[c.unit].map((t) => ({
+        qty: t.qty, discount_pct: t.discount_pct,
+        price_cents: Math.round(c.price_cents * t.qty * (1 - t.discount_pct / 100)),
+      })),
+    }));
+    const owned = db.prepare(`SELECT p.*, c.name, c.icon FROM packs p JOIN catalog c ON c.id = p.catalog_id WHERE p.customer_id = ? ORDER BY p.expires_at ASC`).all(uid);
+    res.json({ offers, owned, expiry_days: PACK_EXPIRY_DAYS });
+  });
+
+  // buy a prepaid pack (payment already authorized client-side, mirrors /topup)
+  app.post('/api/customers/:id/packs', (req, res) => {
+    const uid = req.params.id;
+    const { catalog_id, qty } = req.body;
+    const cat = db.prepare('SELECT * FROM catalog WHERE id = ?').get(catalog_id);
+    if (!cat || !PACKABLE_ITEMS.includes(cat.name)) return res.status(404).json({ error: 'Unknown service.' });
+    const tier = (PACK_TIERS[cat.unit] || []).find((t) => t.qty === Number(qty));
+    if (!tier) return res.status(400).json({ error: 'Invalid pack size.' });
+    const price = Math.round(cat.price_cents * tier.qty * (1 - tier.discount_pct / 100));
+    payments.charge({ orderId: 'pack', amountCents: price, customer: getUser(uid) });
+    const pid = id('pack');
+    const purchased = now();
+    const expires = new Date(Date.now() + PACK_EXPIRY_DAYS * 86400000).toISOString();
+    db.prepare('INSERT INTO packs (id,customer_id,catalog_id,unit,quantity_total,quantity_used,price_cents,purchased_at,expires_at) VALUES (?,?,?,?,?,?,?,?,?)')
+      .run(pid, uid, catalog_id, cat.unit, tier.qty, 0, price, purchased, expires);
+    notify({ io, userId: uid, type: 'payment', title: 'Prepaid pack purchased 🎉', body: `${tier.qty}${cat.unit === 'per_kg' ? 'kg' : ' items'} of ${cat.name} added.` });
+    res.json(db.prepare(`SELECT p.*, c.name, c.icon FROM packs p JOIN catalog c ON c.id = p.catalog_id WHERE p.id = ?`).get(pid));
   });
 
   // referrals
@@ -1070,26 +1145,30 @@ export function registerRoutes(app, io) {
 }
 
 // ---- pricing engine ----
-function lineTotal(cat, it) {
+function lineTotal(cat, it, coveredQty = 0) {
   // explicit per-unit price override (e.g. B2B contract pricing set at runtime)
   if (it.unit_cents != null && it.unit_cents !== '') {
     const per = Number(it.unit_cents) || 0;
     return it.weight_kg ? Math.round(per * it.weight_kg) : per * (it.qty || 1);
   }
   if (!cat) return it.price_cents || 0;
-  if (cat.unit === 'per_kg') return Math.round(cat.price_cents * (it.weight_kg || 0));
-  return cat.price_cents * (it.qty || 1);
+  if (cat.unit === 'per_kg') return Math.round(cat.price_cents * Math.max(0, (it.weight_kg || 0) - coveredQty));
+  return cat.price_cents * Math.max(0, (it.qty || 1) - coveredQty);
 }
 
 function priceOrder({ customer_id, items = [], use_credit = false, b2b = false }) {
   let subtotal = 0;
+  let packCreditCents = 0;
   for (const it of items) {
     const cat = db.prepare('SELECT * FROM catalog WHERE id = ?').get(it.catalog_id);
-    subtotal += lineTotal(cat, it);
+    const qty = cat?.unit === 'per_kg' ? (it.weight_kg || 0) : (it.qty || 1);
+    const covered = (!b2b && customer_id) ? packCoverage(customer_id, it.catalog_id, qty) : 0;
+    subtotal += lineTotal(cat, it, covered);
+    if (covered > 0 && cat) packCreditCents += cat.unit === 'per_kg' ? Math.round(cat.price_cents * covered) : cat.price_cents * covered;
   }
   // B2B = contract billing: items only, no consumer platform fee / delivery / plan discount / wallet
   if (b2b) {
-    return { subtotal_cents: subtotal, platform_fee_cents: 0, delivery_fee_cents: 0, discount_cents: 0, credit_applied_cents: 0, total_cents: subtotal, plan: 'B2B' };
+    return { subtotal_cents: subtotal, platform_fee_cents: 0, delivery_fee_cents: 0, discount_cents: 0, credit_applied_cents: 0, pack_credit_cents: 0, total_cents: subtotal, plan: 'B2B' };
   }
   const sub = customer_id ? activeSub(customer_id) : null;
   // Chase Plus/Pro waive the flat service fee (no more % discount) + get free delivery
@@ -1108,6 +1187,7 @@ function priceOrder({ customer_id, items = [], use_credit = false, b2b = false }
     delivery_fee_cents: delivery,
     discount_cents: 0,
     credit_applied_cents: creditApplied,
+    pack_credit_cents: packCreditCents,
     total_cents: Math.max(0, total),
     plan: sub ? sub.plan_name : 'Lite',
   };

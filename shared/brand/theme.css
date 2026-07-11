@@ -89,6 +89,11 @@ input, textarea, select { font-family: inherit; }
 .cl-skel { background: linear-gradient(90deg,#eee,#f5f5f5,#eee); background-size: 200% 100%; animation: cl-sk 1.2s infinite; border-radius: 8px; }
 @keyframes cl-sk { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
 
+/* horizontally-scrolling strips (pack tiers, category tabs) — swipeable, no visible scrollbar */
+.cl-hscroll { overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none; scroll-snap-type: x proximity; }
+.cl-hscroll::-webkit-scrollbar { display: none; height: 0; }
+.cl-hscroll > * { scroll-snap-align: start; }
+
 /* OneMap / Leaflet markers */
 .leaflet-container { font-family: var(--font); background: #dde3f0; }
 .cl-leaflet-icon { background: none; border: none; }

@@ -32,6 +32,49 @@ export function getSocket() {
   return socket;
 }
 
+// LaundryHeap-style catalog display: tag chips + blurb per category, used on
+// the customer app's Prices/order-flow cards and the web booking flow alike.
+export const CATEGORY_CHIPS = {
+  wash_fold: ['WASH', 'TUMBLE-DRY', 'FOLDED', 'IN A BAG'],
+  dry_clean: ['DRY CLEANING', 'IRONING', 'ON HANGERS'],
+  bedding: ['CUSTOM CLEANING'],
+  ironing: ['IRONING', 'ON HANGERS'],
+  specialty: ['CUSTOM CLEANING'],
+};
+export const CATEGORY_DESC = {
+  wash_fold: 'For everyday laundry, bedsheets and towels.',
+  dry_clean: 'For everyday laundry that requires ironing after washing, or for dry cleaning.',
+  bedding: 'For larger items that require extra care.',
+  ironing: 'For items that are already clean.',
+  specialty: 'Specialist care for delicate or bulky items.',
+};
+export const CATEGORY_LABEL = {
+  wash_fold: 'Wash & Fold',
+  dry_clean: 'Dry Cleaning',
+  bedding: 'Duvets & Bulky Items',
+  ironing: 'Ironing Only',
+  specialty: 'Specialty Care',
+};
+export const CATEGORY_ORDER = ['wash_fold', 'dry_clean', 'ironing', 'bedding', 'specialty'];
+// tints stay within the navy/lime brand palette — only the mix ratio differs per category
+export const CATEGORY_TINT = {
+  wash_fold: 'var(--lime-pale)',
+  dry_clean: 'rgba(29,41,81,.08)',
+  ironing: 'rgba(29,41,81,.14)',
+  bedding: '#EAF7CF',
+  specialty: 'rgba(29,41,81,.05)',
+};
+export const CATEGORY_INFO = {
+  wash_fold: 'Washed at 30–40°C, tumble-dried, neatly folded and bagged. Ideal for everyday clothes, bedsheets and towels.',
+  dry_clean: 'Professionally dry-cleaned or wash-and-pressed, then returned on hangers — best for shirts, suits and dresses.',
+  bedding: 'Bulky items like duvets and comforters get extra-care cleaning suited to their size and fabric.',
+  ironing: 'Already-clean items pressed and returned on hangers — no washing included.',
+  specialty: 'Deep-clean treatment for delicate or heavily-soiled items like trainers and bags.',
+};
+export function etaLabel(hours) {
+  return hours >= 24 ? `${Math.round(hours / 24)} day service` : `${hours}h turnaround`;
+}
+
 export const fmt = {
   money: (cents) => `S$${((cents || 0) / 100).toFixed(2)}`,
   time: (iso) => (iso ? new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''),
