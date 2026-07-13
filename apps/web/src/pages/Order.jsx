@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { api, fmt, PlacesAutocomplete, HANDOVER, ADDRESS_TYPES, REPEAT_CADENCE, Card, Button, Chip, CATEGORY_CHIPS, CATEGORY_DESC, etaLabel, PaymentSheet } from '@shared';
 import { customerId } from '../auth.js';
 
@@ -7,10 +7,12 @@ const CUSTOMER_ID = customerId();
 
 export default function Order() {
   const nav = useNavigate();
-  const [step, setStep] = useState(1);
+  const location = useLocation();
+  const [skipItemStep] = useState(() => !!(location.state?.cart && Object.keys(location.state.cart).length));
+  const [step, setStep] = useState(() => (skipItemStep ? 2 : 1));
   const [catalog, setCatalog] = useState([]);
   const [summary, setSummary] = useState(null);
-  const [cart, setCart] = useState({});
+  const [cart, setCart] = useState(() => location.state?.cart || {});
   const [slot, setSlot] = useState('Today · 18:00–20:00');
   const [useCredit, setUseCredit] = useState(true);
   const [quote, setQuote] = useState(null);
@@ -189,7 +191,7 @@ export default function Order() {
               </div>
               <textarea className="cl-field" rows={3} placeholder="E.g., 2 Oxford shirts (White/Blue), tumble dry low for chinos..." value={notes} onChange={(e) => setNotes(e.target.value)} style={{ width: '100%', marginBottom: 12, resize: 'vertical' }} />
               <div style={{ display: 'flex', gap: 12, marginTop: 22 }}>
-                <button className="cl-btn cl-btn-ghost" style={{ width: 'auto' }} onClick={() => setStep(1)}>← Back</button>
+                <button className="cl-btn cl-btn-ghost" style={{ width: 'auto' }} onClick={() => (skipItemStep ? nav('/prices') : setStep(1))}>← Back</button>
                 <button className="cl-btn cl-btn-lime" style={{ width: 'auto' }} disabled={!addrId} onClick={() => setStep(3)}>Review order →</button>
               </div>
             </div>
