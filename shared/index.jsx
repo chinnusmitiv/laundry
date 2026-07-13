@@ -68,7 +68,7 @@ export function Avatar({ name, color = '#1D2951', size = 38 }) {
 // status pill with colour by stage
 const STATUS_COLOR = {
   placed: '#9CA3AF', assigned: '#6366F1', driver_en_route: '#3B82F6', picked_up: '#3B82F6',
-  at_facility: '#8B5CF6', processing: '#8B5CF6', ready: '#10B981',
+  at_facility: '#8B5CF6', confirmed: '#0EA5E9', processing: '#8B5CF6', ready: '#10B981',
   out_for_delivery: '#F59E0B', delivered: '#16A34A', completed: '#16A34A', cancelled: '#EF4444',
 };
 export function StatusPill({ status, label }) {
@@ -99,7 +99,7 @@ export function BottomNav({ tabs, active, onChange }) {
         <button key={t.key} onClick={() => onChange(t.key)}
           style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
           <span style={{
-            width: 52, height: 52, borderRadius: 52, background: 'var(--navy)', color: 'var(--lime)',
+            width: 52, height: 52, borderRadius: 52, background: 'var(--navy)', color: '#fff',
             display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, fontWeight: 700,
             marginTop: -30, boxShadow: '0 8px 18px rgba(17,22,58,.35)', border: '4px solid #fff',
           }}>{t.icon}</span>

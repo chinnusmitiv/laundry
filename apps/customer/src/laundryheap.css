@@ -1,0 +1,43 @@
+/* ─────────────────────────────────────────────────────────────
+   Laundryheap-style skin — CUSTOMER APP ONLY.
+   This file is imported only by apps/customer/src/main.jsx, so it
+   never affects the driver / ops / web surfaces. It remaps the shared
+   brand tokens to Laundryheap's clean white + blue palette:
+     • white backgrounds, deep-navy ink, bright-blue primary CTAs
+     • "--lime" (the shared "primary CTA / bright accent" slot) becomes
+        Laundryheap blue, so on-accent text must flip from navy → white.
+   ───────────────────────────────────────────────────────────── */
+:root {
+  /* deep navy ink — topbar, dark cards, primary text, selection borders */
+  --navy:  #0E2A63;
+  --navy2: #0A2050;
+  --navy3: #16357E;
+
+  /* primary action / bright accent slot (was lime green) → Laundryheap blue */
+  --lime:      #2563EB;   /* solid blue CTA fill */
+  --lime-d:    #1D4ED8;   /* darker blue — borders, "added" state */
+  --lime-pale: #EAF1FE;   /* soft blue tint — promo/info card backgrounds */
+
+  /* surfaces */
+  --bg:    #FFFFFF;       /* page behind the phone frame */
+  --light: #F4F7FE;       /* app scroll surface */
+
+  /* softer, bluer shadows to match */
+  --shadow:    0 18px 50px rgba(14, 42, 99, 0.14);
+  --shadow-sm: 0 4px 16px rgba(14, 42, 99, 0.08);
+}
+
+/* On-accent text: the accent is now blue, so text on it must be white
+   (the shared theme set these to navy, assuming a light-green accent). */
+.cl-btn-lime { color: #ffffff !important; }
+.cl-chip-navy { color: #ffffff !important; }
+
+/* Keep the light-blue chip readable */
+.cl-chip { background: var(--lime-pale); color: var(--navy); }
+
+/* Ghost buttons pick up the blue tint automatically via --navy, but make
+   the wash a touch bluer for the Laundryheap feel */
+.cl-btn-ghost { background: rgba(37, 99, 235, 0.08); color: var(--navy); }
+
+/* Gold review stars used on the Home trust bar */
+.lh-stars { color: #FBBF24; letter-spacing: 1px; }

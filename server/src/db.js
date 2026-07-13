@@ -55,7 +55,8 @@ export function initSchema() {
     price_cents INTEGER NOT NULL,
     icon TEXT,
     eta_hours INTEGER DEFAULT 24,
-    scope TEXT NOT NULL DEFAULT 'b2c'  -- b2c (consumer catalog) | b2b (corporate: linens/towels)
+    scope TEXT NOT NULL DEFAULT 'b2c',  -- b2c (consumer catalog) | b2b (corporate: linens/towels)
+    grp TEXT                            -- garment sub-group for per-item pricelists (Shirts, Tops, Bottoms, Suits…)
   );
 
   -- per-client negotiated B2B rates — overrides the b2b catalog's default price_cents for a specific business
@@ -240,6 +241,37 @@ export function initSchema() {
     PRIMARY KEY (facility_id, catalog_id)
   );
 
+  -- consolidated B2B invoices (monthly statements): one invoice bills a business
+  -- client for many completed orders. Orders link back via orders.invoice_id.
+  CREATE TABLE IF NOT EXISTS invoices (
+    id TEXT PRIMARY KEY,
+    code TEXT NOT NULL,                         -- e.g. INV-2026-0007
+    business_id TEXT NOT NULL REFERENCES users(id),
+    period TEXT,                                -- YYYY-MM (statement month), or null for ad-hoc
+    status TEXT NOT NULL DEFAULT 'draft',       -- draft | sent | paid | void
+    subtotal_cents INTEGER NOT NULL DEFAULT 0,
+    tax_cents INTEGER NOT NULL DEFAULT 0,       -- GST
+    total_cents INTEGER NOT NULL DEFAULT 0,
+    notes TEXT,
+    issued_at TEXT NOT NULL,
+    due_at TEXT,
+    sent_at TEXT,
+    paid_at TEXT
+  );
+
+  -- factory (facility) cash withdrawals: a facility requests a payout of its earned
+  -- balance to its bank account; HQ settles it (mock bank transfer).
+  CREATE TABLE IF NOT EXISTS payouts (
+    id TEXT PRIMARY KEY,
+    facility_id TEXT NOT NULL REFERENCES facilities(id),
+    amount_cents INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'requested',  -- requested | paid | rejected
+    bank_account TEXT,
+    note TEXT,
+    requested_at TEXT NOT NULL,
+    settled_at TEXT
+  );
+
   -- key/value app settings (JSON), e.g. order routing config
   CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
@@ -295,8 +327,20 @@ function migrateLoadWash() {
 function migrateB2B() {
   const catCols = db.prepare('PRAGMA table_info(catalog)').all().map((c) => c.name);
   if (!catCols.includes('scope')) db.exec("ALTER TABLE catalog ADD COLUMN scope TEXT NOT NULL DEFAULT 'b2c'");
+  if (!catCols.includes('grp')) db.exec('ALTER TABLE catalog ADD COLUMN grp TEXT');
+  // facility bank account for cash withdrawals (mock)
+  const facCols = db.prepare('PRAGMA table_info(facilities)').all().map((c) => c.name);
+  if (!facCols.includes('bank_account')) db.exec('ALTER TABLE facilities ADD COLUMN bank_account TEXT');
+  // B2B client invoicing (ChaseLaundry → business): invoice lifecycle on the order
+  const oCols = db.prepare('PRAGMA table_info(orders)').all().map((c) => c.name);
+  if (!oCols.includes('invoice_status')) db.exec('ALTER TABLE orders ADD COLUMN invoice_status TEXT'); // unbilled | billed | sent | paid
+  if (!oCols.includes('invoiced_at')) db.exec('ALTER TABLE orders ADD COLUMN invoiced_at TEXT');
+  if (!oCols.includes('invoice_paid_at')) db.exec('ALTER TABLE orders ADD COLUMN invoice_paid_at TEXT');
+  if (!oCols.includes('invoice_id')) db.exec('ALTER TABLE orders ADD COLUMN invoice_id TEXT'); // FK to a consolidated invoice
+  if (!oCols.includes('intake_confirmed_at')) db.exec('ALTER TABLE orders ADD COLUMN intake_confirmed_at TEXT'); // factory verified & locked the billable amount
   const itemCols = db.prepare('PRAGMA table_info(order_items)').all().map((c) => c.name);
-  if (!itemCols.includes('actual_qty')) db.exec('ALTER TABLE order_items ADD COLUMN actual_qty INTEGER');
+  if (!itemCols.includes('actual_qty')) db.exec('ALTER TABLE order_items ADD COLUMN actual_qty INTEGER');       // qty the factory actually received (per_item)
+  if (!itemCols.includes('actual_weight_kg')) db.exec('ALTER TABLE order_items ADD COLUMN actual_weight_kg REAL'); // weight the factory re-weighed (per_kg)
 }
 
 // Add pickup handover instructions to orders (idempotent).
@@ -306,6 +350,11 @@ function migrateOrders() {
   if (!cols.includes('handover_contact')) db.exec('ALTER TABLE orders ADD COLUMN handover_contact TEXT'); // name/phone when someone_else
   if (!cols.includes('tip_cents')) db.exec('ALTER TABLE orders ADD COLUMN tip_cents INTEGER DEFAULT 0'); // driver tip, chosen at checkout
   if (!cols.includes('pack_credit_cents')) db.exec('ALTER TABLE orders ADD COLUMN pack_credit_cents INTEGER DEFAULT 0'); // value covered by a prepaid pack
+  // authorize-now / capture-on-delivery: hold the card at checkout, charge on success
+  if (!cols.includes('payment_auth_id')) db.exec('ALTER TABLE orders ADD COLUMN payment_auth_id TEXT');            // Stripe PaymentIntent id of the hold
+  if (!cols.includes('hold_amount_cents')) db.exec('ALTER TABLE orders ADD COLUMN hold_amount_cents INTEGER');     // amount held on the card
+  if (!cols.includes('authorized_at')) db.exec('ALTER TABLE orders ADD COLUMN authorized_at TEXT');
+  if (!cols.includes('captured_at')) db.exec('ALTER TABLE orders ADD COLUMN captured_at TEXT');
 
   const acols = db.prepare('PRAGMA table_info(addresses)').all().map((c) => c.name);
   if (!acols.includes('type')) db.exec("ALTER TABLE addresses ADD COLUMN type TEXT DEFAULT 'home'"); // home | work | other
@@ -340,6 +389,7 @@ export const STATUS_FLOW = [
   'driver_en_route',
   'picked_up',
   'at_facility',
+  'confirmed',
   'processing',
   'ready',
   'out_for_delivery',
@@ -353,6 +403,7 @@ export const STATUS_LABEL = {
   driver_en_route: 'Driver on the way',
   picked_up: 'Picked up',
   at_facility: 'At facility',
+  confirmed: 'Items confirmed',
   processing: 'Cleaning in progress',
   ready: 'Ready',
   out_for_delivery: 'Out for delivery',

@@ -1,18 +1,17 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { api, fmt, PlacesAutocomplete, HANDOVER, ADDRESS_TYPES, REPEAT_CADENCE, Card, Button, Chip, CATEGORY_CHIPS, CATEGORY_DESC, etaLabel, PaymentSheet } from '@shared';
 import { customerId } from '../auth.js';
+import WebServicePicker from './ServicePicker.jsx';
 
 const CUSTOMER_ID = customerId();
 
 export default function Order() {
   const nav = useNavigate();
-  const location = useLocation();
-  const [skipItemStep] = useState(() => !!(location.state?.cart && Object.keys(location.state.cart).length));
-  const [step, setStep] = useState(() => (skipItemStep ? 2 : 1));
+  const [step, setStep] = useState(1);
   const [catalog, setCatalog] = useState([]);
   const [summary, setSummary] = useState(null);
-  const [cart, setCart] = useState(() => location.state?.cart || {});
+  const [cart, setCart] = useState({});
   const [slot, setSlot] = useState('Today · 18:00–20:00');
   const [useCredit, setUseCredit] = useState(true);
   const [quote, setQuote] = useState(null);
@@ -89,46 +88,10 @@ export default function Order() {
         <Steps step={step} />
         {step === 1 && (
           <div className="two-col">
-            <div className="panel">
+            <div>
               <h2 style={{ fontWeight: 900, marginBottom: 6 }}>What needs cleaning?</h2>
-              <p className="cl-muted" style={{ marginBottom: 20 }}>Add items by weight or by piece.</p>
-              {catalog.map((c) => {
-                const v = cart[c.id] || {};
-                const added = (c.unit === 'per_kg' ? v.weight : v.qty) > 0;
-                return (
-                  <Card key={c.id} style={{ marginBottom: 12, background: added ? 'var(--lime-pale)' : '#fff', border: added ? '1.5px solid var(--lime-d)' : '1.5px solid transparent' }}>
-                    <div className="cl-between" style={{ alignItems: 'flex-start', gap: 14 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                        <span style={{ fontSize: 28 }}>{c.icon}</span>
-                        <div><div style={{ fontWeight: 800 }}>{c.name}</div><div className="cl-muted" style={{ fontSize: 13 }}>From {fmt.money(c.price_cents)} Price per {c.unit === 'per_kg' ? 'kg' : 'item'}</div></div>
-                      </div>
-                      {!added
-                        ? <Button sm variant="ghost" onClick={() => setItem(c.id, c.unit === 'per_kg' ? { weight: 1 } : { qty: 1 })} style={{ whiteSpace: 'nowrap' }}>+ Add</Button>
-                        : <Button sm variant="navy" onClick={() => setItem(c.id, c.unit === 'per_kg' ? { weight: 0 } : { qty: 0 })} style={{ whiteSpace: 'nowrap' }}>✓ Added</Button>}
-                    </div>
-                    <div className="cl-row" style={{ gap: 6, flexWrap: 'wrap', marginTop: 12 }}>
-                      {(CATEGORY_CHIPS[c.category] || []).map((t) => <Chip key={t} variant="gray">{t}</Chip>)}
-                    </div>
-                    <div className="cl-between" style={{ marginTop: 8, alignItems: 'flex-end' }}>
-                      <div className="cl-muted" style={{ fontSize: 13, maxWidth: 420 }}>{CATEGORY_DESC[c.category]}</div>
-                      <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--navy)', flexShrink: 0 }}>{etaLabel(c.eta_hours)}</span>
-                    </div>
-
-                    {added && <>
-                      <div className="cl-between" style={{ marginTop: 14 }}>
-                        {c.unit === 'per_kg'
-                          ? <Stepper value={v.weight || 0} step={0.5} unit="kg" onChange={(weight) => setItem(c.id, { weight })} />
-                          : <Stepper value={v.qty || 0} step={1} onChange={(qty) => setItem(c.id, { qty })} />}
-                        <button onClick={() => setNoteOpen((s) => ({ ...s, [c.id]: !s[c.id] }))} style={{ fontSize: 13, fontWeight: 700, color: 'var(--navy)' }}>Any special requests?</button>
-                      </div>
-                      {noteOpen[c.id] && (
-                        <input className="cl-field" style={{ marginTop: 10, width: '100%' }} placeholder={`Notes for ${c.name}…`}
-                          value={v.note || ''} onChange={(e) => setItem(c.id, { note: e.target.value })} />
-                      )}
-                    </>}
-                  </Card>
-                );
-              })}
+              <p className="cl-muted" style={{ marginBottom: 20 }}>Wash &amp; Fold by weight; everything else per item.</p>
+              <WebServicePicker catalog={catalog} cart={cart} setCart={setCart} />
             </div>
             <CartSummary items={items} catalog={catalog} onNext={() => setStep(2)} canNext={items.length > 0} nextLabel="Choose a slot" />
           </div>
@@ -191,7 +154,7 @@ export default function Order() {
               </div>
               <textarea className="cl-field" rows={3} placeholder="E.g., 2 Oxford shirts (White/Blue), tumble dry low for chinos..." value={notes} onChange={(e) => setNotes(e.target.value)} style={{ width: '100%', marginBottom: 12, resize: 'vertical' }} />
               <div style={{ display: 'flex', gap: 12, marginTop: 22 }}>
-                <button className="cl-btn cl-btn-ghost" style={{ width: 'auto' }} onClick={() => (skipItemStep ? nav('/prices') : setStep(1))}>← Back</button>
+                <button className="cl-btn cl-btn-ghost" style={{ width: 'auto' }} onClick={() => setStep(1)}>← Back</button>
                 <button className="cl-btn cl-btn-lime" style={{ width: 'auto' }} disabled={!addrId} onClick={() => setStep(3)}>Review order →</button>
               </div>
             </div>
@@ -202,7 +165,8 @@ export default function Order() {
         {step === 3 && (
           <div className="two-col">
             <div className="panel">
-              <h2 style={{ fontWeight: 900, marginBottom: 16 }}>Pay now (incl. tax)</h2>
+              <h2 style={{ fontWeight: 900, marginBottom: 4 }}>Review &amp; confirm</h2>
+              <p className="cl-muted" style={{ fontSize: 13, marginBottom: 16 }}>💳 We hold this on your card now and only charge it when your order is delivered.</p>
               {!quote ? <p>Calculating…</p> : <>
                 <Row l="Subtotal" v={fmt.money(quote.subtotal_cents)} />
                 <Row l="Service fee" v={quote.platform_fee_cents ? fmt.money(quote.platform_fee_cents) : 'WAIVED'} />
@@ -212,11 +176,11 @@ export default function Order() {
                 <button onClick={() => setChargesInfoOpen((x) => !x)} style={{ fontSize: 13, fontWeight: 700, color: 'var(--navy)', marginTop: 8 }}>How charges work?</button>
                 {chargesInfoOpen && (
                   <div className="cl-muted" style={{ fontSize: 13, marginTop: 8, lineHeight: 1.5 }}>
-                    Priced per kg or item at checkout. The service fee covers collection & delivery — waived automatically on Plus/Pro. Wallet credit is applied before your card is charged.
+                    We place a hold on your card at checkout and only capture it once your order is delivered. Priced per kg or item; the service fee covers collection & delivery — waived on Plus/Pro. Wallet credit is applied before the hold.
                   </div>
                 )}
                 <div className="cl-divider" />
-                <Row l={<b style={{ fontSize: 18 }}>Total today</b>} v={<b style={{ fontSize: 18 }}>{fmt.money(quote.total_cents + tipCents)}</b>} />
+                <Row l={<b style={{ fontSize: 18 }}>Held now · charged on delivery</b>} v={<b style={{ fontSize: 18 }}>{fmt.money(quote.total_cents + tipCents)}</b>} />
 
                 <label className="cl-between" style={{ marginTop: 16, cursor: 'pointer' }} onClick={() => setUseCredit((x) => !x)}>
                   <span style={{ fontWeight: 700 }}>Use wallet credit ({fmt.money(summary?.balance_cents || 0)})</span>
@@ -261,7 +225,7 @@ export default function Order() {
 
                 <div style={{ display: 'flex', gap: 12, marginTop: 22 }}>
                   <button className="cl-btn cl-btn-ghost" style={{ width: 'auto' }} onClick={() => setStep(2)}>← Back</button>
-                  <button className="cl-btn cl-btn-lime" style={{ width: 'auto' }} disabled={placing} onClick={placeWithUpsell}>{placing ? 'Placing…' : `Pay now ${fmt.money(quote.total_cents + tipCents)}`}</button>
+                  <button className="cl-btn cl-btn-lime" style={{ width: 'auto' }} disabled={placing} onClick={placeWithUpsell}>{placing ? 'Placing…' : `Confirm · hold ${fmt.money(quote.total_cents + tipCents)}`}</button>
                 </div>
 
                 <PaymentSheet open={!!payPlan} onClose={() => setPayPlan(null)} amountCents={payPlan?.price_cents || 0}
@@ -278,7 +242,7 @@ export default function Order() {
             <div style={{ fontSize: 60 }}>🎉</div>
             <h2 style={{ fontWeight: 900, margin: '10px 0' }}>Order {placed.code} confirm liao!</h2>
             <p className="cl-muted" style={{ marginBottom: 8 }}>We assign a driver and collect at <b>{slot}</b>. Sit back and relax ah.</p>
-            <p className="cl-muted" style={{ marginBottom: 24 }}>Total today: <b>{fmt.money(placed.total_cents)}</b></p>
+            <p className="cl-muted" style={{ marginBottom: 24 }}>💳 <b>{fmt.money(placed.hold_amount_cents || placed.total_cents)}</b> held on your card — you're only charged when it's delivered.</p>
             <button className="cl-btn cl-btn-lime" onClick={() => nav('/account')}>Track my order →</button>
           </div>
         )}

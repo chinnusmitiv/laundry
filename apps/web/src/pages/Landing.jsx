@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api, fmt, Mark } from '@shared';
+import { api, fmt, Mark, CATEGORY_ORDER, CATEGORY_LABEL, CATEGORY_DESC } from '@shared';
 
 const storeBadge = { display: 'flex', alignItems: 'center', gap: 10, background: 'var(--navy)', color: '#fff', borderRadius: 12, padding: '10px 18px', cursor: 'pointer', border: 'none' };
 const AREAS = ['Tiong Bahru', 'Tanjong Pagar', 'Orchard', 'Bukit Timah', 'Tampines', 'Bedok', 'Jurong East', 'Clementi', 'Holland Village', 'Novena', 'Serangoon', 'Punggol'];
@@ -25,32 +25,37 @@ export default function Landing() {
         <div className="hero-ring" style={{ width: 300, height: 300, top: 40, right: 220 }} />
         <div className="web-wrap hero-grid">
           <div>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: 'rgba(199,255,51,.12)', color: 'var(--lime)', padding: '7px 14px', borderRadius: 999, fontSize: 13, fontWeight: 800, letterSpacing: '.5px', marginBottom: 24 }}>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: 'rgba(37,99,235,.16)', color: '#8CB0FF', padding: '7px 14px', borderRadius: 999, fontSize: 13, fontWeight: 800, letterSpacing: '.5px', marginBottom: 24 }}>
               ● Now collecting across Singapore
             </div>
-            <h1>More Life.<br /><span className="g">Less Laundry.</span></h1>
-            <p>We collect, clean and return your clothes — fresh to your door within 24 hours. You just relax, we chiong for you. Every garment tracked some more.</p>
+            <h1>Take back your time.<br /><span className="g">Leave the laundry to us.</span></h1>
+            <p>Laundry &amp; dry cleaning with free 48-hour delivery, right to your door. We collect, clean and return — every garment tagged and tracked.</p>
             <div style={{ display: 'flex', gap: 14 }}>
-              <button className="cl-btn cl-btn-lime" style={{ width: 'auto', padding: '15px 30px' }} onClick={() => nav('/order')}>Schedule a pickup →</button>
+              <button className="cl-btn cl-btn-lime" style={{ width: 'auto', padding: '15px 30px' }} onClick={() => nav('/order')}>Schedule your pickup →</button>
               <button className="cl-btn" style={{ width: 'auto', padding: '15px 28px', background: 'rgba(255,255,255,.1)', color: '#fff' }} onClick={() => document.getElementById('how')?.scrollIntoView({ behavior: 'smooth' })}>How it works</button>
             </div>
-            <div style={{ display: 'flex', gap: 28, marginTop: 40 }}>
-              {[['24h', 'turnaround'], ['4.9★', '1,200+ reviews'], ['100%', 'tracked garments']].map(([a, b]) => (
-                <div key={a}><div style={{ fontSize: 28, fontWeight: 900, color: 'var(--lime)' }}>{a}</div><div style={{ fontSize: 13, color: 'rgba(255,255,255,.5)' }}>{b}</div></div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 26 }}>
+              <span className="lh-stars" style={{ fontSize: 18 }}>★★★★★</span>
+              <span style={{ fontWeight: 800, fontSize: 14 }}>Rated Excellent</span>
+              <span style={{ color: 'rgba(255,255,255,.5)', fontSize: 14 }}>· 1,200+ reviews</span>
+            </div>
+            <div style={{ display: 'flex', gap: 28, marginTop: 30 }}>
+              {[['48h', 'free delivery'], ['No min.', 'order size'], ['100%', 'tracked garments']].map(([a, b]) => (
+                <div key={a}><div style={{ fontSize: 26, fontWeight: 900, color: '#fff' }}>{a}</div><div style={{ fontSize: 13, color: 'rgba(255,255,255,.5)' }}>{b}</div></div>
               ))}
             </div>
           </div>
           {/* hero card mock */}
-          <div style={{ background: 'linear-gradient(145deg,#253470,#162040)', borderRadius: 26, padding: 30, boxShadow: 'var(--shadow)' }}>
+          <div style={{ background: 'linear-gradient(145deg,#16357E,#0A2050)', borderRadius: 26, padding: 30, boxShadow: 'var(--shadow)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 22 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}><Mark size={32} /><b style={{ color: '#fff', fontSize: 16 }}>Order CL-1042</b></div>
               <span className="cl-chip cl-chip-navy">On the way</span>
             </div>
             {[['🏷️', 'Checked in & tagged', 'done'], ['🫧', 'Washing', 'done'], ['🔥', 'Ironing', 'now'], ['📦', 'Packed', ''], ['✅', 'Returned to you', '']].map(([ic, label, st], i) => (
               <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '11px 0', opacity: st ? 1 : .4 }}>
-                <div style={{ width: 38, height: 38, borderRadius: 38, background: st === 'done' ? 'var(--lime)' : st === 'now' ? 'rgba(199,255,51,.25)' : 'rgba(255,255,255,.08)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 17, outline: st === 'now' ? '2px solid var(--lime)' : 'none' }}>{ic}</div>
+                <div style={{ width: 38, height: 38, borderRadius: 38, background: st === 'done' ? 'var(--lime)' : st === 'now' ? 'rgba(37,99,235,.3)' : 'rgba(255,255,255,.08)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 17, outline: st === 'now' ? '2px solid var(--lime)' : 'none' }}>{ic}</div>
                 <div style={{ color: '#fff', fontWeight: st === 'now' ? 800 : 500, flex: 1 }}>{label}</div>
-                {st === 'done' && <span style={{ color: 'var(--lime)' }}>✓</span>}
+                {st === 'done' && <span style={{ color: '#8CB0FF' }}>✓</span>}
               </div>
             ))}
           </div>
@@ -85,7 +90,7 @@ export default function Landing() {
         <div className="web-wrap">
           <div style={{ background: 'linear-gradient(120deg,#162040,#253470)', borderRadius: 24, padding: '36px 44px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 24, flexWrap: 'wrap', color: '#fff' }}>
             <div>
-              <div style={{ fontSize: 22, fontWeight: 900, marginBottom: 6 }}>New here? Get <span style={{ color: 'var(--lime)' }}>S$10 credit</span> on signup 🎁</div>
+              <div style={{ fontSize: 22, fontWeight: 900, marginBottom: 6 }}>New here? Get <span style={{ color: '#8CB0FF' }}>S$10 credit</span> on signup 🎁</div>
               <p style={{ color: 'rgba(255,255,255,.6)', fontSize: 15, margin: 0 }}>Sign up in under a minute — your welcome credit applies automatically to your first order.</p>
             </div>
             <button className="cl-btn cl-btn-lime" style={{ width: 'auto', padding: '14px 28px', whiteSpace: 'nowrap' }} onClick={() => nav('/order')}>Claim & schedule →</button>
@@ -101,13 +106,19 @@ export default function Landing() {
             <div className="section-title">Everything in your wardrobe</div>
           </div>
           <div className="grid-4">
-            {catalog.map((c) => (
-              <div key={c.id} className="feat">
-                <div className="ic">{c.icon}</div>
-                <h3>{c.name}</h3>
-                <p>{fmt.money(c.price_cents)} / {c.unit === 'per_kg' ? 'kg' : 'item'} · ready in {c.eta_hours}h</p>
-              </div>
-            ))}
+            {CATEGORY_ORDER.filter((k) => catalog.some((c) => c.category === k)).map((cat) => {
+              const items = catalog.filter((c) => c.category === cat);
+              const min = Math.min(...items.map((c) => c.price_cents));
+              const perKg = items[0].unit === 'per_kg';
+              return (
+                <div key={cat} className="feat" style={{ cursor: 'pointer' }} onClick={() => nav('/prices')}>
+                  <div className="ic">{items[0].icon}</div>
+                  <h3>{CATEGORY_LABEL[cat]}</h3>
+                  <p>{CATEGORY_DESC[cat]}</p>
+                  <div style={{ fontWeight: 800, color: 'var(--navy)', marginTop: 10 }}>from {fmt.money(perKg ? min * 6 : min)} <span className="cl-muted" style={{ fontWeight: 600, fontSize: 13 }}>/ {perKg ? '6kg' : 'item'}</span></div>
+                </div>
+              );
+            })}
           </div>
         </div>
       </section>

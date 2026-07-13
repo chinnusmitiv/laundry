@@ -1,7 +1,7 @@
 import { nanoid } from 'nanoid';
 import { randomInt } from 'node:crypto';
 import { db, STATUS_FLOW, STATUS_LABEL, GARMENT_FLOW } from './db.js';
-import { payments, google, notify, stepToward, distanceKm } from './services.js';
+import { payments, bank, email, google, notify, stepToward, distanceKm } from './services.js';
 import { searchPlaces, searchOneMap } from './places.js';
 import { hashPassword } from './crypto.js';
 
@@ -138,6 +138,54 @@ function broadcastOrder(io, oid) {
   return o;
 }
 
+// Settle the card hold when an order reaches a terminal state:
+// capture (charge) on delivery/completion, release (void) on cancellation.
+// `o` is the order row as it was BEFORE the status change. No-op unless a hold is live.
+function settleHold(io, o, next) {
+  if (o.payment_status !== 'authorized') return;
+  const amt = o.hold_amount_cents ?? o.total_cents;
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(o.customer_id);
+  if (next === 'completed') {
+    payments.capture({ authId: o.payment_auth_id, orderId: o.code, amountCents: amt });
+    db.prepare("UPDATE orders SET payment_status = 'paid', captured_at = ?, updated_at = ? WHERE id = ?").run(now(), now(), o.id);
+    notify({ io, userId: o.customer_id, type: 'payment', title: 'Payment charged', body: `S$${(amt / 100).toFixed(2)} charged for ${o.code} — all done! 🎉`, orderId: o.id });
+  } else if (next === 'cancelled') {
+    payments.voidAuth({ authId: o.payment_auth_id, orderId: o.code });
+    db.prepare("UPDATE orders SET payment_status = 'voided', updated_at = ? WHERE id = ?").run(now(), o.id);
+    notify({ io, userId: o.customer_id, type: 'payment', title: 'Hold released', body: `${o.code} cancelled — the hold was released, you were not charged.`, orderId: o.id });
+  }
+}
+
+// What a facility is owed for cleaning one order: per-facility negotiated cost per
+// catalog item (falls back to 70% of retail). Load-wash/by-the-bag use the actual
+// weighed/counted amount recorded at intake, not the customer's checkout estimate.
+function facilityOrderCost(o, pricingMap) {
+  const items = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(o.id);
+  let cost = 0;
+  for (const it of items) {
+    const cat = db.prepare('SELECT * FROM catalog WHERE id = ?').get(it.catalog_id);
+    if (!cat) continue;
+    const cpu = pricingMap[it.catalog_id] !== undefined ? pricingMap[it.catalog_id] : Math.round(cat.price_cents * 0.70);
+    if (cat.unit === 'per_kg') cost += Math.round(cpu * (it.actual_weight_kg ?? it.weight_kg ?? 0));
+    else if (cat.unit === 'per_bag') cost += cpu * (it.actual_qty ?? it.qty ?? 1);
+    else cost += cpu * (it.qty || 1);
+  }
+  return cost;
+}
+
+// A facility's earnings balance: all-time payout earned on completed orders, minus
+// what's already been paid out or is pending in a withdrawal request.
+function facilityBalance(facId) {
+  const orders = db.prepare("SELECT * FROM orders WHERE facility_id = ? AND status = 'completed'").all(facId);
+  const pricing = db.prepare('SELECT * FROM facility_pricing WHERE facility_id = ?').all(facId);
+  const pricingMap = {};
+  for (const p of pricing) pricingMap[p.catalog_id] = p.cost_cents;
+  const earned = orders.reduce((s, o) => s + facilityOrderCost(o, pricingMap), 0);
+  const paid = db.prepare("SELECT COALESCE(SUM(amount_cents),0) s FROM payouts WHERE facility_id = ? AND status = 'paid'").get(facId).s;
+  const pending = db.prepare("SELECT COALESCE(SUM(amount_cents),0) s FROM payouts WHERE facility_id = ? AND status = 'requested'").get(facId).s;
+  return { earned, paid, pending, available: earned - paid - pending, order_count: orders.length };
+}
+
 export function registerRoutes(app, io) {
   // ===========================================================
   // SHARED / LOOKUP
@@ -261,6 +309,7 @@ export function registerRoutes(app, io) {
   // add a saved address (from a places-autocomplete selection)
   app.post('/api/customers/:id/addresses', (req, res) => {
     const uid = req.params.id;
+    if (!getUser(uid)) return res.status(404).json({ error: 'Account not found — please sign in again.' });
     const { label, type, line1, line2, city, postcode, lat, lng, make_default } = req.body;
     const aid = id('adr');
     if (make_default) db.prepare('UPDATE addresses SET is_default = 0 WHERE user_id = ?').run(uid);
@@ -306,6 +355,10 @@ export function registerRoutes(app, io) {
 
     // B2B: no customer account — find-or-create a lightweight business client (role='business', no login)
     const isB2B = !!(business_name && business_name.trim());
+    // B2C: reject a stale/deleted session up front with a clean error (avoids a raw FK crash)
+    if (!isB2B && customer_id && !getUser(customer_id)) {
+      return res.status(404).json({ error: 'Account not found — please sign in again.' });
+    }
     if (isB2B) {
       const name = business_name.trim();
       let biz = db.prepare("SELECT * FROM users WHERE role = 'business' AND LOWER(name) = LOWER(?)").get(name);
@@ -332,8 +385,11 @@ export function registerRoutes(app, io) {
     }
     // B2B drops off at the warehouse → starts in processing flow; consumer flow starts at pickup
     const status = driver_id ? 'assigned' : (isB2B && facility_id ? 'at_facility' : 'placed');
-    const paymentStatus = isB2B ? 'invoiced' : 'pending'; // B2B billed on terms, not pay-now
     const tipCents = isB2B ? 0 : Math.max(0, Math.round(tip_cents || 0));
+    // authorize-now / capture-on-delivery: hold the card at checkout, charge on success.
+    // B2B is billed on terms; a fully credit-covered order has nothing to hold (already settled).
+    const holdAmount = pricing.total_cents + tipCents;
+    const paymentStatus = isB2B ? 'invoiced' : (holdAmount <= 0 ? 'paid' : 'authorized');
     db.prepare(`INSERT INTO orders (id,code,customer_id,address_id,driver_id,facility_id,status,pickup_slot,return_slot,notes,handover,handover_contact,
         subtotal_cents,platform_fee_cents,delivery_fee_cents,discount_cents,credit_applied_cents,pack_credit_cents,tip_cents,total_cents,payment_status,repeat_requested,repeat_cadence,created_at,updated_at)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, ?, ?, ?, ?, ?)`)
@@ -350,13 +406,20 @@ export function registerRoutes(app, io) {
         .run(id('itm'), oid, it.catalog_id, cat?.name || it.name, it.qty || 1, it.weight_kg || null, line);
       if (covered > 0) consumePacks(customer_id, it.catalog_id, covered);
     }
-    // consumer-only: spend wallet credit + push an in-app notification (business has no app)
+    // consumer-only: spend wallet credit + hold the card + push an in-app notification (business has no app)
     if (!isB2B) {
       if (pricing.credit_applied_cents > 0) {
         db.prepare('INSERT INTO credits (id,user_id,amount_cents,type,reason,order_id,created_at) VALUES (?,?,?,?,?,?,?)')
           .run(id('cr'), customer_id, -pricing.credit_applied_cents, 'spend', `Applied to ${code}`, oid, now());
       }
-      notify({ io, userId: customer_id, type: 'order', title: 'Order confirm liao 🎉', body: `${code} received! We assign a driver for you shortly, don't worry ah.`, orderId: oid });
+      // place a hold on the card now; it's only captured when the order is delivered
+      if (holdAmount > 0) {
+        const auth = payments.authorize({ orderId: code, amountCents: holdAmount, customer: getUser(customer_id) });
+        db.prepare('UPDATE orders SET payment_auth_id = ?, hold_amount_cents = ?, authorized_at = ? WHERE id = ?')
+          .run(auth.id, holdAmount, now(), oid);
+      }
+      const holdNote = holdAmount > 0 ? ` We've placed a S$${(holdAmount / 100).toFixed(2)} hold — you're only charged when it's delivered.` : '';
+      notify({ io, userId: customer_id, type: 'order', title: 'Order confirm liao 🎉', body: `${code} received! We assign a driver for you shortly.${holdNote}`, orderId: oid });
     }
     io.to('role:ops').emit('order:new', fullOrder(oid));
     res.json(fullOrder(oid));
@@ -429,12 +492,18 @@ export function registerRoutes(app, io) {
     res.json(getUser(u.id));
   });
 
+  // Charge the order now. If the card was held at checkout we capture that hold
+  // (no second charge); otherwise we charge fresh. Either way ends up 'paid'.
   app.post('/api/orders/:id/pay', (req, res) => {
     const o = db.prepare('SELECT * FROM orders WHERE id = ?').get(req.params.id);
     if (!o) return res.status(404).json({ error: 'not found' });
-    const pay = payments.charge({ orderId: o.id, amountCents: o.total_cents, customer: getUser(o.customer_id) });
-    db.prepare('UPDATE orders SET payment_status = ?, updated_at = ? WHERE id = ?').run('paid', now(), o.id);
-    notify({ io, userId: o.customer_id, type: 'payment', title: 'Payment received', body: `S$${(o.total_cents / 100).toFixed(2)} paid for ${o.code}.`, orderId: o.id });
+    if (o.payment_status === 'paid') return res.json({ ok: true, order: fullOrder(o.id) });
+    const amt = o.payment_status === 'authorized' ? (o.hold_amount_cents ?? o.total_cents) : o.total_cents;
+    const pay = o.payment_status === 'authorized'
+      ? payments.capture({ authId: o.payment_auth_id, orderId: o.code, amountCents: amt })
+      : payments.charge({ orderId: o.id, amountCents: amt, customer: getUser(o.customer_id) });
+    db.prepare('UPDATE orders SET payment_status = ?, captured_at = ?, updated_at = ? WHERE id = ?').run('paid', now(), now(), o.id);
+    notify({ io, userId: o.customer_id, type: 'payment', title: 'Payment received', body: `S$${(amt / 100).toFixed(2)} paid for ${o.code}.`, orderId: o.id });
     res.json({ ok: true, payment: pay, order: broadcastOrder(io, o.id) });
   });
 
@@ -693,8 +762,60 @@ export function registerRoutes(app, io) {
     if (!o) return res.status(404).json({ error: 'not found' });
     const next = req.body.status;
     if (!STATUS_FLOW.includes(next) && next !== 'cancelled') return res.status(400).json({ error: 'bad status' });
+    // Cleaning can't start until the factory has confirmed (re-counted/re-weighed) the
+    // intake — that's what locks the billable amount. No skipping straight to processing.
+    if (next === 'processing' && !o.intake_confirmed_at) {
+      return res.status(409).json({ error: 'Confirm the items first — the factory must verify the intake before cleaning can start.' });
+    }
     db.prepare('UPDATE orders SET status = ?, updated_at = ? WHERE id = ?').run(next, now(), o.id);
+    settleHold(io, o, next); // capture the card hold on delivery success, release it on cancel
     notify({ io, userId: o.customer_id, type: 'order', title: STATUS_LABEL[next], body: `Order ${o.code}: ${STATUS_LABEL[next]}.`, orderId: o.id });
+    res.json(broadcastOrder(io, o.id));
+  });
+
+  // FACTORY INTAKE CONFIRMATION — the warehouse re-counts/re-weighs what actually
+  // arrived, the order re-prices to reality, and the billable amount is locked.
+  // Body: { items: [{ id, qty?, weight_kg? }] }  (order_item ids; omit an item to keep it as-booked)
+  // Moves the order to 'confirmed'. For a consumer order still on hold, the card
+  // hold is re-authorized to the corrected amount.
+  app.post('/api/orders/:id/confirm-intake', (req, res) => {
+    const o = db.prepare('SELECT * FROM orders WHERE id = ?').get(req.params.id);
+    if (!o) return res.status(404).json({ error: 'not found' });
+    if (['completed', 'cancelled'].includes(o.status)) return res.status(400).json({ error: 'order already closed' });
+
+    const adjust = new Map((req.body.items || []).map((r) => [r.id, r]));
+    const rows = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(o.id);
+    let subtotal = 0;
+    for (const it of rows) {
+      const cat = db.prepare('SELECT * FROM catalog WHERE id = ?').get(it.catalog_id);
+      const a = adjust.get(it.id) || {};
+      const perKg = cat?.unit === 'per_kg';
+      // corrected figures (fall back to what was booked)
+      const qty = perKg ? (it.qty || 1) : (a.qty != null ? Math.max(0, Number(a.qty)) : it.qty || 1);
+      const weight = perKg ? (a.weight_kg != null ? Math.max(0, Number(a.weight_kg)) : it.weight_kg || 0) : (it.weight_kg || null);
+      const line = lineTotal(cat, { qty, weight_kg: weight, unit_cents: it.unit_cents ?? null });
+      subtotal += line;
+      db.prepare('UPDATE order_items SET qty = ?, weight_kg = ?, price_cents = ?, actual_qty = ?, actual_weight_kg = ? WHERE id = ?')
+        .run(qty, weight, line, perKg ? null : qty, perKg ? weight : null, it.id);
+    }
+
+    // recompute the order total off the corrected subtotal, keeping fees/credit/tip intact.
+    // (B2B has all those at 0, so total === subtotal.)
+    const newTotal = Math.max(0, subtotal + o.platform_fee_cents + o.delivery_fee_cents - o.discount_cents - o.credit_applied_cents + (o.tip_cents || 0));
+
+    // consumer order still on hold → re-authorize the card to the corrected amount
+    if (o.payment_status === 'authorized' && newTotal !== (o.hold_amount_cents ?? o.total_cents)) {
+      const user = getUser(o.customer_id);
+      if (o.payment_auth_id) payments.voidAuth({ authId: o.payment_auth_id, orderId: o.code });
+      const auth = payments.authorize({ orderId: o.code, amountCents: newTotal, customer: user });
+      db.prepare('UPDATE orders SET payment_auth_id = ?, hold_amount_cents = ?, authorized_at = ? WHERE id = ?')
+        .run(auth.id, newTotal, now(), o.id);
+    }
+
+    db.prepare("UPDATE orders SET subtotal_cents = ?, total_cents = ?, status = 'confirmed', intake_confirmed_at = ?, updated_at = ? WHERE id = ?")
+      .run(subtotal, newTotal, now(), now(), o.id);
+
+    notify({ io, userId: o.customer_id, type: 'order', title: 'Items confirmed', body: `Order ${o.code}: factory confirmed your items — total S$${(newTotal / 100).toFixed(2)}.`, orderId: o.id });
     res.json(broadcastOrder(io, o.id));
   });
 
@@ -729,7 +850,11 @@ export function registerRoutes(app, io) {
         ? c(`SELECT COUNT(*) c FROM transfers WHERE status='in_transit' AND (to_facility_id=? OR from_facility_id=?)`, fid, fid)
         : c(`SELECT COUNT(*) c FROM transfers WHERE status='in_transit'`),
       drivers_on_shift: c(`SELECT COUNT(*) c FROM shifts WHERE status='active'`),
-      revenue_cents: db.prepare(`SELECT COALESCE(SUM(total_cents),0) c FROM orders WHERE payment_status='paid'${fc}`).get(...fa).c,
+      // Accrual: revenue is recognised the moment the work is done (order completed),
+      // whether it's a consumer card charge or a B2B order still awaiting its monthly invoice.
+      revenue_cents: db.prepare(`SELECT COALESCE(SUM(total_cents),0) c FROM orders WHERE status='completed'${fc}`).get(...fa).c,
+      // A/R: completed B2B work not yet settled by a paid invoice (money earned, not yet collected).
+      receivable_cents: db.prepare(`SELECT COALESCE(SUM(total_cents),0) c FROM orders WHERE status='completed' AND payment_status IN ('invoiced','sent')${fc}`).get(...fa).c,
       open_threads: c(`SELECT COUNT(*) c FROM support_threads WHERE status='open'`),
     });
   });
@@ -1090,6 +1215,199 @@ export function registerRoutes(app, io) {
     }
 
     res.json({ month, summaries });
+  });
+
+  // ---- Factory cash withdrawals (facility earnings → bank) ----
+  // A facility's earnings balance + its withdrawal history.
+  app.get('/api/ops/facilities/:id/earnings', (req, res) => {
+    const fac = db.prepare('SELECT * FROM facilities WHERE id = ?').get(req.params.id);
+    if (!fac) return res.status(404).json({ error: 'facility not found' });
+    const bal = facilityBalance(fac.id);
+    const payouts = db.prepare('SELECT * FROM payouts WHERE facility_id = ? ORDER BY requested_at DESC').all(fac.id);
+    res.json({ facility_id: fac.id, name: fac.name, code: fac.code, bank_account: fac.bank_account, ...bal, payouts });
+  });
+
+  // A facility requests a cash withdrawal to its bank account.
+  app.post('/api/ops/facilities/:id/payouts', (req, res) => {
+    const fac = db.prepare('SELECT * FROM facilities WHERE id = ?').get(req.params.id);
+    if (!fac) return res.status(404).json({ error: 'facility not found' });
+    const amount = Math.round(Number(req.body.amount_cents) || 0);
+    const account = String(req.body.bank_account || '').trim() || fac.bank_account;
+    const bal = facilityBalance(fac.id);
+    if (amount <= 0) return res.status(400).json({ error: 'Enter an amount to withdraw.' });
+    if (amount > bal.available) return res.status(400).json({ error: `Amount exceeds your available balance (S$${(bal.available / 100).toFixed(2)}).` });
+    if (!account) return res.status(400).json({ error: 'Add a bank account to receive the payout.' });
+    if (req.body.bank_account) db.prepare('UPDATE facilities SET bank_account = ? WHERE id = ?').run(account, fac.id);
+    const pid = id('po');
+    db.prepare('INSERT INTO payouts (id,facility_id,amount_cents,status,bank_account,note,requested_at) VALUES (?,?,?,?,?,?,?)')
+      .run(pid, fac.id, amount, 'requested', account, String(req.body.note || '').trim() || null, now());
+    io.to('role:ops').emit('payout:new', { id: pid, facility_id: fac.id });
+    res.json(db.prepare('SELECT * FROM payouts WHERE id = ?').get(pid));
+  });
+
+  // HQ: all withdrawal requests across factories.
+  app.get('/api/ops/payouts', (req, res) => {
+    let sql = 'SELECT p.*, f.name AS facility_name, f.code AS facility_code FROM payouts p JOIN facilities f ON f.id = p.facility_id';
+    const args = [];
+    if (req.query.status) { sql += ' WHERE p.status = ?'; args.push(req.query.status); }
+    sql += ' ORDER BY p.requested_at DESC';
+    res.json(db.prepare(sql).all(...args));
+  });
+
+  // HQ: settle a withdrawal — sends the cash to the factory's bank account (mock).
+  app.post('/api/ops/payouts/:id/settle', (req, res) => {
+    const p = db.prepare('SELECT * FROM payouts WHERE id = ?').get(req.params.id);
+    if (!p) return res.status(404).json({ error: 'not found' });
+    if (p.status !== 'requested') return res.status(400).json({ error: 'Already settled.' });
+    const fac = db.prepare('SELECT * FROM facilities WHERE id = ?').get(p.facility_id);
+    const tx = bank.payout({ facility: fac, amountCents: p.amount_cents, account: p.bank_account });
+    db.prepare("UPDATE payouts SET status = 'paid', settled_at = ? WHERE id = ?").run(now(), p.id);
+    io.to('role:ops').emit('payout:updated', { id: p.id });
+    res.json({ ...db.prepare('SELECT * FROM payouts WHERE id = ?').get(p.id), tx });
+  });
+
+  app.post('/api/ops/payouts/:id/reject', (req, res) => {
+    const p = db.prepare('SELECT * FROM payouts WHERE id = ?').get(req.params.id);
+    if (!p) return res.status(404).json({ error: 'not found' });
+    db.prepare("UPDATE payouts SET status = 'rejected', settled_at = ?, note = ? WHERE id = ?").run(now(), String(req.body.note || 'Rejected').trim(), p.id);
+    io.to('role:ops').emit('payout:updated', { id: p.id });
+    res.json(db.prepare('SELECT * FROM payouts WHERE id = ?').get(p.id));
+  });
+
+  // ---- B2B consolidated invoicing (ChaseLaundry → business clients) ----
+  // One monthly statement bills a client for many completed orders. Orders link
+  // back via orders.invoice_id. GST is added on top of the retail subtotal.
+  const GST_RATE = 0.09; // Singapore GST
+
+  const invoiceOrders = (invId) =>
+    db.prepare('SELECT * FROM orders WHERE invoice_id = ? ORDER BY created_at').all(invId).map((o) => {
+      const items = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(o.id);
+      return {
+        id: o.id, code: o.code, created_at: o.created_at, status: o.status, total_cents: o.total_cents,
+        items: items.map((it) => ({ name: it.name, qty: it.qty, weight_kg: it.weight_kg, price_cents: it.price_cents })),
+        description: items.map((it) => it.name + (it.weight_kg ? ` (${it.weight_kg}kg)` : it.qty > 1 ? ` ×${it.qty}` : '')).join(', ') || '—',
+      };
+    });
+
+  const invoiceDetail = (inv) => {
+    const biz = getUser(inv.business_id);
+    return { ...inv, business: biz || null, orders: invoiceOrders(inv.id) };
+  };
+
+  // Per-business billing summary: unbilled orders + issued statements + outstanding.
+  app.get('/api/ops/b2b-invoices', (_req, res) => {
+    const businesses = db.prepare("SELECT * FROM users WHERE role = 'business' ORDER BY name").all();
+    const out = businesses.map((b) => {
+      const unbilled = db.prepare("SELECT * FROM orders WHERE customer_id = ? AND status = 'completed' AND invoice_id IS NULL AND payment_status != 'paid' ORDER BY created_at").all(b.id);
+      const unbilledSubtotal = unbilled.reduce((s, o) => s + o.total_cents, 0);
+      const invoices = db.prepare('SELECT * FROM invoices WHERE business_id = ? ORDER BY issued_at DESC').all(b.id).map((iv) => ({
+        ...iv, order_count: db.prepare('SELECT COUNT(*) c FROM orders WHERE invoice_id = ?').get(iv.id).c,
+      }));
+      const openInvoices = invoices.filter((iv) => iv.status === 'sent' || iv.status === 'draft').reduce((s, iv) => s + iv.total_cents, 0);
+      return {
+        id: b.id, name: b.name, email: b.email, phone: b.phone,
+        unbilled: { count: unbilled.length, subtotal_cents: unbilledSubtotal, orders: unbilled.map((o) => ({ id: o.id, code: o.code, total_cents: o.total_cents, created_at: o.created_at })) },
+        invoices,
+        outstanding_cents: unbilledSubtotal + openInvoices,
+      };
+    }).filter((b) => db.prepare('SELECT COUNT(*) c FROM orders WHERE customer_id = ?').get(b.id).c > 0);
+    res.json(out);
+  });
+
+  // Core: roll a business's unbilled completed orders (optionally scoped to a
+  // YYYY-MM period) into one draft statement with GST. Returns the invoice id,
+  // or null when there's nothing to bill. Shared by the manual per-business
+  // action and the month-end run.
+  const generateStatement = (biz, period) => {
+    let sql = "SELECT * FROM orders WHERE customer_id = ? AND status = 'completed' AND invoice_id IS NULL AND payment_status != 'paid'";
+    const args = [biz.id];
+    if (period) { sql += ' AND substr(created_at, 1, 7) = ?'; args.push(period); }
+    const orders = db.prepare(sql + ' ORDER BY created_at').all(...args);
+    if (!orders.length) return null;
+    const subtotal = orders.reduce((s, o) => s + o.total_cents, 0);
+    const tax = Math.round(subtotal * GST_RATE);
+    const total = subtotal + tax;
+    const seq = db.prepare('SELECT COUNT(*) c FROM invoices').get().c + 1;
+    const code = `INV-${new Date().getFullYear()}-${String(seq).padStart(4, '0')}`;
+    const iid = id('inv');
+    const due = new Date(Date.now() + 14 * 864e5).toISOString();
+    db.prepare('INSERT INTO invoices (id,code,business_id,period,status,subtotal_cents,tax_cents,total_cents,issued_at,due_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
+      .run(iid, code, biz.id, period, 'draft', subtotal, tax, total, now(), due);
+    const link = db.prepare("UPDATE orders SET invoice_id = ?, invoice_status = 'billed', updated_at = ? WHERE id = ?");
+    for (const o of orders) link.run(iid, now(), o.id);
+    io.to('role:ops').emit('invoice:updated', { id: iid });
+    return iid;
+  };
+
+  // Generate a consolidated statement for one business (draft, not yet sent).
+  app.post('/api/ops/business/:id/invoices', (req, res) => {
+    const biz = getUser(req.params.id);
+    if (!biz || biz.role !== 'business') return res.status(404).json({ error: 'business not found' });
+    const period = (req.body.period || '').trim() || null;
+    const iid = generateStatement(biz, period);
+    if (!iid) return res.status(400).json({ error: 'No unbilled completed orders to invoice for this period.' });
+    res.json(invoiceDetail(db.prepare('SELECT * FROM invoices WHERE id = ?').get(iid)));
+  });
+
+  // MONTH-END BILLING — one click bills every client at once. Sweeps all
+  // businesses with unbilled completed orders for the period into their own
+  // draft statements. Body: { period?: 'YYYY-MM' } (defaults to last month).
+  app.post('/api/ops/billing/run-month-end', (req, res) => {
+    let period = (req.body.period || '').trim() || null;
+    if (!period) {
+      const d = new Date();
+      d.setDate(1);
+      d.setMonth(d.getMonth() - 1); // previous calendar month
+      period = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    }
+    const businesses = db.prepare("SELECT * FROM users WHERE role = 'business'").all();
+    const generated = [];
+    for (const biz of businesses) {
+      const iid = generateStatement(biz, period);
+      if (iid) generated.push(invoiceDetail(db.prepare('SELECT * FROM invoices WHERE id = ?').get(iid)));
+    }
+    const total_cents = generated.reduce((s, iv) => s + iv.total_cents, 0);
+    res.json({ period, count: generated.length, total_cents, invoices: generated });
+  });
+
+  // Full detail for one statement (business + orders + line items) — powers the printable invoice.
+  app.get('/api/ops/invoices/:id', (req, res) => {
+    const inv = db.prepare('SELECT * FROM invoices WHERE id = ?').get(req.params.id);
+    if (!inv) return res.status(404).json({ error: 'not found' });
+    res.json(invoiceDetail(inv));
+  });
+
+  // Email the statement to the client (draft → sent).
+  app.post('/api/ops/invoices/:id/send', (req, res) => {
+    const inv = db.prepare('SELECT * FROM invoices WHERE id = ?').get(req.params.id);
+    if (!inv) return res.status(404).json({ error: 'not found' });
+    const biz = getUser(inv.business_id);
+    email.send({ to: biz?.email || 'billing@client.test', subject: `Statement ${inv.code} — ChaseLaundry`, body: `Amount due S$${(inv.total_cents / 100).toFixed(2)} by ${(inv.due_at || '').slice(0, 10)}. Thank you for your business.` });
+    db.prepare("UPDATE invoices SET status = CASE WHEN status = 'draft' THEN 'sent' ELSE status END, sent_at = ? WHERE id = ?").run(now(), inv.id);
+    db.prepare("UPDATE orders SET invoice_status = 'sent', invoiced_at = ? WHERE invoice_id = ?").run(now(), inv.id);
+    io.to('role:ops').emit('invoice:updated', { id: inv.id });
+    res.json(invoiceDetail(db.prepare('SELECT * FROM invoices WHERE id = ?').get(inv.id)));
+  });
+
+  // Mark the statement paid — settles all its orders (client paid on terms).
+  app.post('/api/ops/invoices/:id/paid', (req, res) => {
+    const inv = db.prepare('SELECT * FROM invoices WHERE id = ?').get(req.params.id);
+    if (!inv) return res.status(404).json({ error: 'not found' });
+    db.prepare("UPDATE invoices SET status = 'paid', paid_at = ? WHERE id = ?").run(now(), inv.id);
+    db.prepare("UPDATE orders SET payment_status = 'paid', invoice_status = 'paid', invoice_paid_at = ? WHERE invoice_id = ?").run(now(), inv.id);
+    io.to('role:ops').emit('invoice:updated', { id: inv.id });
+    res.json(invoiceDetail(db.prepare('SELECT * FROM invoices WHERE id = ?').get(inv.id)));
+  });
+
+  // Void a draft/sent statement — releases its orders back to unbilled.
+  app.post('/api/ops/invoices/:id/void', (req, res) => {
+    const inv = db.prepare('SELECT * FROM invoices WHERE id = ?').get(req.params.id);
+    if (!inv) return res.status(404).json({ error: 'not found' });
+    if (inv.status === 'paid') return res.status(400).json({ error: 'Cannot void a paid statement.' });
+    db.prepare("UPDATE invoices SET status = 'void' WHERE id = ?").run(inv.id);
+    db.prepare("UPDATE orders SET invoice_id = NULL, invoice_status = 'unbilled' WHERE invoice_id = ?").run(inv.id);
+    io.to('role:ops').emit('invoice:updated', { id: inv.id });
+    res.json({ ok: true });
   });
 
   // ===========================================================

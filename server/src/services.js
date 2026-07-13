@@ -41,6 +41,22 @@ export const payments = {
     log('stripe', `charge S$${(amountCents / 100).toFixed(2)} for ${orderId} (${customer?.email}) → succeeded (test mode)`);
     return { id: `pi_${nanoid(16)}`, status: 'succeeded', amount: amountCents };
   },
+  // Hold funds on the card without taking them (Stripe: capture_method='manual').
+  authorize({ orderId, amountCents, customer }) {
+    const id = `pi_${nanoid(16)}`;
+    log('stripe', `authorize (hold) S$${(amountCents / 100).toFixed(2)} for ${orderId} (${customer?.email}) → requires_capture (test mode)`);
+    return { id, status: 'requires_capture', amount: amountCents };
+  },
+  // Take the previously-held funds once the order is fulfilled.
+  capture({ authId, orderId, amountCents }) {
+    log('stripe', `capture S$${(amountCents / 100).toFixed(2)} on ${authId} for ${orderId} → succeeded (test mode)`);
+    return { id: authId, status: 'succeeded', amount: amountCents };
+  },
+  // Release a hold without charging (order cancelled).
+  voidAuth({ authId, orderId }) {
+    log('stripe', `void/release hold ${authId} for ${orderId} → canceled (test mode)`);
+    return { id: authId, status: 'canceled' };
+  },
   refund({ orderId, amountCents }) {
     log('stripe', `refund S$${(amountCents / 100).toFixed(2)} for ${orderId} → succeeded`);
     return { id: `re_${nanoid(16)}`, status: 'succeeded' };
@@ -48,6 +64,15 @@ export const payments = {
   createSubscription({ user, plan }) {
     log('stripe', `subscription ${plan.name} (S$${(plan.price_cents / 100).toFixed(2)}/mo) for ${user.email} → active`);
     return { id: `sub_${nanoid(14)}`, status: 'active' };
+  },
+};
+
+// --- Bank payouts (factory cash withdrawals) — Stripe-Connect-shaped, mocked ---
+export const bank = {
+  payout({ facility, amountCents, account }) {
+    const id = `po_${nanoid(16)}`;
+    log('bank', `payout S$${(amountCents / 100).toFixed(2)} to ${facility?.name || 'facility'} (${account || 'bank account'}) → paid (test mode)`);
+    return { id, status: 'paid', amount: amountCents };
   },
 };
 

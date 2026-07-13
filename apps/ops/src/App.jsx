@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import QRCode from 'qrcode';
 import {
   api, fmt, useSocket, getSocket, STATUS_FLOW, STATUS_LABEL, GARMENT_FLOW, GARMENT_LABEL,
@@ -49,7 +50,7 @@ function AdminLogin({ onAuth }) {
 
 function OpsConsole({ onLogout }) {
   const [scope, setScope] = useState(() => { try { return JSON.parse(localStorage.getItem('cl_ops_scope')); } catch { return null; } });
-  const [view, setView] = useState('dashboard');
+  const [view, setView] = useState(() => new URLSearchParams(location.search).get('view') || 'dashboard');
   const [stats, setStats] = useState(null);
   const facilityId = scope?.facilityId || null;
   const isHQ = !!scope?.isHQ;
@@ -168,7 +169,8 @@ function Dashboard({ stats, onGo, scope }) {
       { label: 'Drivers on shift', value: stats.drivers_on_shift, icon: '🚚', go: 'drivers' },
       { label: 'Open tickets', value: stats.open_threads, icon: '💬', go: 'support' },
     ] : []),
-    { label: 'Revenue (paid)', value: fmt.money(stats.revenue_cents), icon: '💷' },
+    { label: 'Revenue (earned)', value: fmt.money(stats.revenue_cents), icon: '💷' },
+    ...(stats.receivable_cents > 0 ? [{ label: 'Awaiting invoice', value: fmt.money(stats.receivable_cents), icon: '🧾', accent: true, go: isHQ ? 'invoicing' : undefined }] : []),
   ];
   return (
     <>
@@ -673,6 +675,7 @@ function FacilityBoard({ order, onReload }) {
   const [form, setForm] = useState({ type: '', color: '', weight_kg: '', care: '' });
   const [labelsFor, setLabelsFor] = useState(null);
   const [expanded, setExpanded] = useState(null);
+  const [confirming, setConfirming] = useState(false);
   if (!order) return null;
   const setG = async (gid, status) => { await api.post(`/api/garments/${gid}/status`, { status }); onReload(); };
   const advG = async (gid) => { await api.post(`/api/garments/${gid}/advance`, { actor: 'ops' }); onReload(); };
@@ -689,7 +692,8 @@ function FacilityBoard({ order, onReload }) {
         <div><b style={{ fontSize: 18 }}>{order.code}</b> <span className="cl-muted">· {order.customer?.name}</span></div>
         <div style={{ display: 'flex', gap: 8 }}>
           {order.status === 'picked_up' && <Button sm variant="ghost" onClick={() => advanceOrder('at_facility')}>Check in →</Button>}
-          {order.status === 'at_facility' && <Button sm variant="ghost" onClick={() => advanceOrder('processing')}>Start cleaning →</Button>}
+          {order.status === 'at_facility' && <Button sm variant="lime" onClick={() => setConfirming(true)}>✅ Confirm items →</Button>}
+          {order.status === 'confirmed' && <Button sm variant="lime" onClick={() => advanceOrder('processing')}>Start cleaning →</Button>}
           {order.status === 'processing' && <Button sm variant="lime" onClick={() => advanceOrder('ready')}>Mark ready →</Button>}
           {order.garments.length > 0 && <Button sm variant="ghost" onClick={() => setLabelsFor(order)}>🏷️ Print tags</Button>}
           <Button sm variant="ghost" onClick={() => setAdding((x) => !x)}>+ Intake</Button>
@@ -749,7 +753,83 @@ function FacilityBoard({ order, onReload }) {
         </table>}
 
       {labelsFor && <QrLabels order={labelsFor} onClose={() => setLabelsFor(null)} />}
+      {confirming && <ConfirmIntakeModal order={order} onClose={() => setConfirming(false)} onDone={() => { setConfirming(false); onReload(); }} />}
     </div>
+  );
+}
+
+// Factory intake confirmation: re-count / re-weigh what actually arrived, see the
+// order re-price live, and lock the billable amount (order → 'confirmed').
+function ConfirmIntakeModal({ order, onClose, onDone }) {
+  const [items, setItems] = useState(() => (order.items || []).map((it) => {
+    const perKg = it.catalog_unit === 'per_kg';
+    const bookedQty = perKg ? (it.weight_kg || 0) : (it.qty || 1);
+    // unit rate implied by the booked line (used only for a live preview)
+    const unit = bookedQty > 0 ? it.price_cents / bookedQty : it.price_cents;
+    return { id: it.id, name: it.name, perKg, unit, value: bookedQty, booked: bookedQty };
+  }));
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  const setVal = (id, v) => setItems((xs) => xs.map((x) => x.id === id ? { ...x, value: v } : x));
+  const lineOf = (x) => Math.round(x.unit * (Number(x.value) || 0));
+  const newTotal = items.reduce((s, x) => s + lineOf(x), 0);
+  const bookedTotal = items.reduce((s, x) => s + Math.round(x.unit * x.booked), 0);
+  const delta = newTotal - bookedTotal;
+
+  const save = async () => {
+    setErr(''); setBusy(true);
+    try {
+      const payload = items.map((x) => x.perKg ? { id: x.id, weight_kg: Number(x.value) || 0 } : { id: x.id, qty: Number(x.value) || 0 });
+      await api.post(`/api/orders/${order.id}/confirm-intake`, { items: payload });
+      onDone();
+    } catch (e) { setErr(e.message || 'Could not confirm items.'); setBusy(false); }
+  };
+
+  return createPortal(
+    <div className="cl-modal-backdrop" onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(10,16,40,.55)', display: 'grid', placeItems: 'center', zIndex: 60, padding: 20 }}>
+      <div className="cl-card" onClick={(e) => e.stopPropagation()} style={{ width: 'min(560px, 96vw)', maxHeight: '90vh', overflow: 'auto' }}>
+        <div className="cl-between" style={{ marginBottom: 4 }}>
+          <div style={{ fontWeight: 900, fontSize: 18 }}>Confirm items — {order.code}</div>
+          <button className="cl-x" onClick={onClose} style={{ border: 0, background: 'none', fontSize: 22, cursor: 'pointer', color: 'var(--gray)' }}>×</button>
+        </div>
+        <p className="cl-muted" style={{ fontSize: 13, marginBottom: 14 }}>Re-count / re-weigh what actually arrived. This re-prices the order and locks the billable amount.</p>
+
+        {items.map((x) => (
+          <div key={x.id} className="cl-between" style={{ padding: '10px 0', borderBottom: '1px solid var(--gray3)', gap: 12 }}>
+            <div style={{ minWidth: 0 }}>
+              <b style={{ fontSize: 14 }}>{x.name}</b>
+              <div className="cl-muted" style={{ fontSize: 12 }}>Booked {x.booked}{x.perKg ? 'kg' : ''} · {fmt.money(x.unit)}/{x.perKg ? 'kg' : 'item'}</div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input className="cl-field" type="number" min="0" step={x.perKg ? '0.1' : '1'} style={{ width: 92 }} value={x.value} onChange={(e) => setVal(x.id, e.target.value)} />
+              <span className="cl-muted" style={{ fontSize: 12 }}>{x.perKg ? 'kg' : 'items'}</span>
+              <b style={{ width: 72, textAlign: 'right' }}>{fmt.money(lineOf(x))}</b>
+            </div>
+          </div>
+        ))}
+
+        <div className="cl-between" style={{ marginTop: 14, padding: '12px 14px', background: 'var(--lime-pale)', borderRadius: 12 }}>
+          <div>
+            <div className="cl-muted" style={{ fontSize: 11, fontWeight: 700 }}>NEW BILLABLE TOTAL</div>
+            <div style={{ fontWeight: 900, fontSize: 22 }}>{fmt.money(newTotal)}</div>
+          </div>
+          <div style={{ textAlign: 'right', fontSize: 13 }}>
+            <div className="cl-muted">Booked {fmt.money(bookedTotal)}</div>
+            <div style={{ fontWeight: 800, color: delta === 0 ? 'var(--gray)' : delta > 0 ? 'var(--warn)' : 'var(--ok)' }}>
+              {delta === 0 ? 'no change' : `${delta > 0 ? '+' : '−'}${fmt.money(Math.abs(delta))}`}
+            </div>
+          </div>
+        </div>
+
+        {err && <div style={{ color: 'var(--danger)', fontSize: 13, fontWeight: 600, marginTop: 10 }}>{err}</div>}
+        <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+          <Button variant="ghost" onClick={onClose} style={{ flex: 1 }}>Cancel</Button>
+          <Button variant="lime" disabled={busy} onClick={save} style={{ flex: 2 }}>{busy ? 'Confirming…' : '✅ Confirm & lock total'}</Button>
+        </div>
+      </div>
+    </div>,
+    document.body
   );
 }
 
@@ -1723,6 +1803,7 @@ function InvoicingDashboard({ facilityId, isHQ }) {
   const [pricingFacility, setPricingFacility] = useState(null); // for onboard pricing modal
   const [pricingList, setPricingList] = useState([]); // pricing updates array
   const [isSavingPricing, setIsSavingPricing] = useState(false);
+  const [tab, setTab] = useState(() => new URLSearchParams(location.search).get('tab') || (isHQ ? 'payouts' : 'earnings')); // payouts | withdrawals | b2b | earnings
 
   const load = useCallback(async () => {
     setData(null);
@@ -1768,8 +1849,27 @@ function InvoicingDashboard({ facilityId, isHQ }) {
   // Find selected facility in the invoicing summaries
   const detailsFac = data.summaries.find((s) => s.facility_id === selFacility);
 
+  const tabs = isHQ
+    ? [['payouts', '📊 Factory payouts'], ['withdrawals', '🏦 Withdrawals'], ['b2b', '🧾 B2B invoices']]
+    : [['payouts', '📊 My invoices'], ['earnings', '🏦 Earnings & withdraw']];
+  const TabBar = (
+    <div className="cl-row" style={{ gap: 8, marginBottom: 18, flexWrap: 'wrap' }}>
+      {tabs.map(([k, label]) => (
+        <button key={k} onClick={() => setTab(k)} style={{
+          padding: '9px 16px', borderRadius: 999, fontWeight: 800, fontSize: 13,
+          background: tab === k ? 'var(--navy)' : 'var(--gray3)', color: tab === k ? '#fff' : 'var(--gray)',
+        }}>{label}</button>
+      ))}
+    </div>
+  );
+
+  if (tab === 'withdrawals') return <>{TabBar}<PayoutRequests /></>;
+  if (tab === 'b2b') return <>{TabBar}<B2BInvoices /></>;
+  if (tab === 'earnings') return <>{TabBar}<EarningsWithdraw facilityId={facilityId} /></>;
+
   return (
     <>
+      {TabBar}
       <div className="cl-between" style={{ marginBottom: 18 }}>
         <div>
           <div className="ops-h1">{isHQ ? 'Factory Invoicing & Payouts' : 'My Revenue Invoices'}</div>
@@ -1947,6 +2047,353 @@ function InvoicingDashboard({ facilityId, isHQ }) {
       )}
     </>
   );
+}
+
+// Warehouse console: a facility's earnings balance + request a cash withdrawal to its bank.
+function EarningsWithdraw({ facilityId }) {
+  const [data, setData] = useState(null);
+  const [amount, setAmount] = useState('');
+  const [account, setAccount] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  const load = useCallback(() => { if (facilityId) api.get(`/api/ops/facilities/${facilityId}/earnings`).then((d) => { setData(d); setAccount(d.bank_account || ''); }); }, [facilityId]);
+  useEffect(() => { load(); }, [load]);
+  useSocket({ 'payout:updated': load, 'payout:new': load, 'order:updated': load }, { role: 'ops' }, [facilityId]);
+
+  if (!facilityId) return <Empty icon="🏦" title="HQ has no earnings balance" sub="Switch to a warehouse console to manage its payouts" />;
+  if (!data) return <Skel />;
+
+  const request = async () => {
+    setErr(''); setBusy(true);
+    try {
+      await api.post(`/api/ops/facilities/${facilityId}/payouts`, { amount_cents: Math.round(Number(amount) * 100), bank_account: account.trim() });
+      setAmount(''); load();
+    } catch (e) { setErr(e.message || 'Could not request withdrawal.'); }
+    finally { setBusy(false); }
+  };
+
+  const statusChip = (s) => <Chip variant={s === 'paid' ? 'navy' : s === 'rejected' ? 'gray' : undefined}>{s}</Chip>;
+
+  return (
+    <>
+      <div className="ops-h1" style={{ marginBottom: 4 }}>Earnings &amp; withdrawals</div>
+      <p className="cl-muted" style={{ marginBottom: 18 }}>Your factory's payout balance for completed orders. Withdraw cash to your bank account.</p>
+
+      <div className="ops-grid stat-grid" style={{ marginBottom: 18 }}>
+        {[['Earned (all-time)', data.earned], ['Paid out', data.paid], ['Pending', data.pending], ['Available', data.available]].map(([label, v], i) => (
+          <div key={label} className="cl-card">
+            <div className="cl-muted" style={{ fontSize: 12, fontWeight: 700 }}>{label}</div>
+            <div style={{ fontSize: 26, fontWeight: 900, color: i === 3 ? 'var(--ok)' : 'var(--navy)' }}>{fmt.money(v)}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="cl-card" style={{ marginBottom: 18, maxWidth: 460 }}>
+        <div style={{ fontWeight: 900, marginBottom: 12 }}>Request a withdrawal</div>
+        <Field label="Bank account" placeholder="e.g. DBS ****1234" value={account} onChange={(e) => setAccount(e.target.value)} />
+        <Field label="Amount (S$)" type="number" placeholder="0.00" value={amount} onChange={(e) => setAmount(e.target.value)} />
+        {err && <div style={{ background: 'rgba(239,68,68,.1)', color: 'var(--danger)', fontSize: 13, fontWeight: 600, padding: '10px 12px', borderRadius: 10, marginBottom: 12 }}>{err}</div>}
+        <Button variant="lime" disabled={busy || !amount} onClick={request}>{busy ? 'Requesting…' : 'Request withdrawal →'}</Button>
+      </div>
+
+      <div className="cl-eyebrow" style={{ marginBottom: 10 }}>Withdrawal history</div>
+      <div className="cl-card">
+        {data.payouts.length === 0 ? <Empty icon="🏦" title="No withdrawals yet" /> : (
+          <table className="ops-table" style={{ boxShadow: 'none' }}>
+            <thead><tr><th>Requested</th><th>Amount</th><th>To account</th><th>Status</th></tr></thead>
+            <tbody>
+              {data.payouts.map((p) => (
+                <tr key={p.id}>
+                  <td>{fmt.date(p.requested_at)}</td>
+                  <td><b>{fmt.money(p.amount_cents)}</b></td>
+                  <td className="cl-muted">{p.bank_account || '—'}</td>
+                  <td>{statusChip(p.status)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </>
+  );
+}
+
+// HQ: queue of factory withdrawal requests — settle (pay to bank) or reject.
+function PayoutRequests() {
+  const [rows, setRows] = useState(null);
+  const load = useCallback(() => api.get('/api/ops/payouts').then(setRows), []);
+  useEffect(() => { load(); }, [load]);
+  useSocket({ 'payout:new': load, 'payout:updated': load }, { role: 'ops' }, []);
+
+  if (!rows) return <Skel />;
+  const settle = async (id) => { await api.post(`/api/ops/payouts/${id}/settle`); load(); };
+  const reject = async (id) => { await api.post(`/api/ops/payouts/${id}/reject`, { note: 'Rejected by HQ' }); load(); };
+  const pending = rows.filter((p) => p.status === 'requested');
+
+  return (
+    <>
+      <div className="ops-h1" style={{ marginBottom: 4 }}>Factory withdrawals</div>
+      <p className="cl-muted" style={{ marginBottom: 18 }}>{pending.length} request{pending.length === 1 ? '' : 's'} awaiting payout to factory bank accounts.</p>
+      <div className="cl-card">
+        {rows.length === 0 ? <Empty icon="🏦" title="No withdrawal requests" /> : (
+          <table className="ops-table" style={{ boxShadow: 'none' }}>
+            <thead><tr><th>Factory</th><th>Amount</th><th>Bank account</th><th>Requested</th><th>Status</th><th>Actions</th></tr></thead>
+            <tbody>
+              {rows.map((p) => (
+                <tr key={p.id}>
+                  <td><b>{p.facility_name}</b> <span className="cl-muted">({p.facility_code})</span></td>
+                  <td><b>{fmt.money(p.amount_cents)}</b></td>
+                  <td className="cl-muted">{p.bank_account || '—'}</td>
+                  <td>{fmt.date(p.requested_at)}</td>
+                  <td><Chip variant={p.status === 'paid' ? 'navy' : p.status === 'rejected' ? 'gray' : undefined}>{p.status}</Chip></td>
+                  <td>
+                    {p.status === 'requested' ? (
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <Button sm variant="lime" onClick={() => settle(p.id)}>💸 Pay out</Button>
+                        <Button sm variant="ghost" onClick={() => reject(p.id)}>Reject</Button>
+                      </div>
+                    ) : <span className="cl-muted" style={{ fontSize: 13 }}>{p.settled_at ? fmt.date(p.settled_at) : '—'}</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </>
+  );
+}
+
+// HQ: B2B client billing — consolidate unbilled orders into a monthly statement,
+// send it, mark it paid, and open a detailed printable invoice.
+const INV_CHIP = { draft: 'gray', sent: undefined, paid: 'navy', void: 'gray' };
+
+function B2BInvoices() {
+  const [rows, setRows] = useState(null);
+  const [detailId, setDetailId] = useState(null);
+  const [period, setPeriod] = useState({}); // businessId -> 'YYYY-MM' | '' (all)
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [runPeriod, setRunPeriod] = useState(() => { const d = new Date(); d.setMonth(d.getMonth() - 1); return d.toISOString().slice(0, 7); });
+  const [runBusy, setRunBusy] = useState(false);
+  const [runResult, setRunResult] = useState(null);
+
+  const load = useCallback(() => api.get('/api/ops/b2b-invoices').then(setRows), []);
+  useEffect(() => { load(); }, [load]);
+  useSocket({ 'invoice:updated': load, 'order:updated': load, 'order:new': load }, { role: 'ops' }, []);
+
+  const months = () => { const out = []; const d = new Date(); for (let i = 0; i < 4; i++) { out.push(d.toISOString().slice(0, 7)); d.setMonth(d.getMonth() - 1); } return out; };
+
+  if (!rows) return <Skel />;
+
+  const generate = async (bizId) => {
+    setErr(''); setBusy(true);
+    try { const inv = await api.post(`/api/ops/business/${bizId}/invoices`, { period: period[bizId] || '' }); await load(); setDetailId(inv.id); }
+    catch (e) { setErr(e.message || 'Could not generate statement.'); }
+    finally { setBusy(false); }
+  };
+
+  const runMonthEnd = async () => {
+    setErr(''); setRunResult(null); setRunBusy(true);
+    try {
+      const r = await api.post('/api/ops/billing/run-month-end', { period: runPeriod });
+      setRunResult(r); await load();
+    } catch (e) { setErr(e.message || 'Could not run month-end billing.'); }
+    finally { setRunBusy(false); }
+  };
+
+  return (
+    <>
+      <div className="cl-between" style={{ marginBottom: 4, flexWrap: 'wrap', gap: 12 }}>
+        <div className="ops-h1">B2B billing</div>
+        {/* one click bills every client for the chosen month */}
+        <div className="cl-row" style={{ gap: 8, background: 'var(--lime-pale)', borderRadius: 12, padding: '8px 10px' }}>
+          <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--navy)' }}>Month-end billing</span>
+          <select className="ops-select" value={runPeriod} onChange={(e) => setRunPeriod(e.target.value)}>
+            {months().map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>
+          <Button sm variant="lime" disabled={runBusy} onClick={runMonthEnd}>{runBusy ? 'Running…' : '⚙️ Run month-end billing'}</Button>
+        </div>
+      </div>
+      <p className="cl-muted" style={{ marginBottom: 18 }}>Consolidate a client's completed orders into one monthly statement, then send &amp; track it.</p>
+      {runResult && (
+        <div style={{ background: 'var(--lime-pale)', border: '1px solid var(--lime)', borderRadius: 12, padding: '12px 14px', marginBottom: 12, fontSize: 14 }}>
+          <b>{runResult.count} statement{runResult.count === 1 ? '' : 's'}</b> generated for {runResult.period} · total {fmt.money(runResult.total_cents)}
+          {runResult.count === 0 && <span className="cl-muted"> — nothing unbilled for that month.</span>}
+          {runResult.invoices?.length > 0 && (
+            <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {runResult.invoices.map((iv) => (
+                <button key={iv.id} className="cl-chip" style={{ cursor: 'pointer', border: 0 }} onClick={() => setDetailId(iv.id)}>
+                  {iv.code} · {iv.business?.name} · {fmt.money(iv.total_cents)} →
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {err && <div style={{ background: 'rgba(239,68,68,.1)', color: 'var(--danger)', fontSize: 13, fontWeight: 600, padding: '10px 12px', borderRadius: 10, marginBottom: 12 }}>{err}</div>}
+
+      {rows.length === 0 ? <div className="cl-card"><Empty icon="🧾" title="No business clients yet" sub="B2B orders show up here for invoicing" /></div> :
+        rows.map((b) => (
+          <div key={b.id} className="cl-card" style={{ marginBottom: 16 }}>
+            <div className="cl-between" style={{ marginBottom: 14, flexWrap: 'wrap', gap: 12 }}>
+              <div>
+                <div style={{ fontWeight: 900, fontSize: 18 }}>{b.name}</div>
+                <div className="cl-muted" style={{ fontSize: 13 }}>{b.email || b.phone || '—'}</div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div className="cl-muted" style={{ fontSize: 11, fontWeight: 700 }}>OUTSTANDING</div>
+                <div style={{ fontWeight: 900, fontSize: 20, color: b.outstanding_cents > 0 ? 'var(--warn)' : 'var(--ok)' }}>{fmt.money(b.outstanding_cents)}</div>
+              </div>
+            </div>
+
+            {/* unbilled → generate statement */}
+            <div className="cl-between" style={{ background: 'var(--lime-pale)', borderRadius: 12, padding: '12px 14px', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
+              <div style={{ fontSize: 14 }}>
+                <b>{b.unbilled.count}</b> unbilled completed order{b.unbilled.count === 1 ? '' : 's'}
+                {b.unbilled.count > 0 && <span className="cl-muted"> · {fmt.money(b.unbilled.subtotal_cents)} + GST</span>}
+              </div>
+              <div className="cl-row" style={{ gap: 8 }}>
+                <select className="ops-select" value={period[b.id] || ''} onChange={(e) => setPeriod((p) => ({ ...p, [b.id]: e.target.value }))}>
+                  <option value="">All unbilled</option>
+                  {months().map((m) => <option key={m} value={m}>{m}</option>)}
+                </select>
+                <Button sm variant="lime" disabled={busy || b.unbilled.count === 0} onClick={() => generate(b.id)}>🧾 Generate statement</Button>
+              </div>
+            </div>
+
+            {/* statements */}
+            {b.invoices.length === 0 ? <p className="cl-muted" style={{ fontSize: 13 }}>No statements issued yet.</p> : (
+              <table className="ops-table" style={{ boxShadow: 'none' }}>
+                <thead><tr><th>Statement</th><th>Period</th><th>Orders</th><th>Issued</th><th>Due</th><th>Total (inc. GST)</th><th>Status</th><th></th></tr></thead>
+                <tbody>
+                  {b.invoices.map((iv) => (
+                    <tr key={iv.id}>
+                      <td><b>{iv.code}</b></td>
+                      <td>{iv.period || 'All'}</td>
+                      <td>{iv.order_count}</td>
+                      <td>{fmt.date(iv.issued_at)}</td>
+                      <td>{fmt.date(iv.due_at)}</td>
+                      <td><b>{fmt.money(iv.total_cents)}</b></td>
+                      <td><Chip variant={INV_CHIP[iv.status]}>{iv.status}</Chip></td>
+                      <td><Button sm variant="ghost" onClick={() => setDetailId(iv.id)}>View →</Button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        ))}
+
+      {detailId && <InvoiceDetailModal invoiceId={detailId} onClose={() => setDetailId(null)} onChanged={load} />}
+    </>
+  );
+}
+
+// Detailed, printable statement: header, bill-to, per-order line items, GST, total.
+function InvoiceDetailModal({ invoiceId, onClose, onChanged }) {
+  const [inv, setInv] = useState(null);
+  const load = useCallback(() => api.get(`/api/ops/invoices/${invoiceId}`).then(setInv), [invoiceId]);
+  useEffect(() => { load(); }, [load]);
+
+  const act = async (path) => { const r = await api.post(`/api/ops/invoices/${invoiceId}/${path}`); if (r?.id) setInv(r); onChanged?.(); };
+
+  return createPortal(
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,.55)', zIndex: 200, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '40px 16px', overflowY: 'auto' }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: '#fff', borderRadius: 16, width: '100%', maxWidth: 760, boxShadow: '0 24px 60px rgba(0,0,0,.3)' }}>
+        {!inv ? <div style={{ padding: 40 }}><Skel /></div> : <>
+          <div id="inv-print" style={{ padding: 32 }}>
+            <div className="cl-between" style={{ alignItems: 'flex-start', marginBottom: 28 }}>
+              <div>
+                <Logo size={22} theme="light" />
+                <div className="cl-muted" style={{ fontSize: 12, marginTop: 8, lineHeight: 1.6 }}>ChaseLaundry Pte Ltd<br />GST Reg: 2026XXXXX<br />hello@chaselaundry.com</div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontSize: 26, fontWeight: 900, letterSpacing: '-.5px' }}>INVOICE</div>
+                <div style={{ fontWeight: 800, color: 'var(--navy)' }}>{inv.code}</div>
+                <div style={{ marginTop: 6 }}><Chip variant={INV_CHIP[inv.status]}>{inv.status}</Chip></div>
+              </div>
+            </div>
+
+            <div className="cl-between" style={{ alignItems: 'flex-start', marginBottom: 24, flexWrap: 'wrap', gap: 16 }}>
+              <div>
+                <div className="cl-eyebrow" style={{ marginBottom: 6 }}>Bill to</div>
+                <div style={{ fontWeight: 800, fontSize: 15 }}>{inv.business?.name || '—'}</div>
+                <div className="cl-muted" style={{ fontSize: 13 }}>{inv.business?.email || inv.business?.phone || ''}</div>
+              </div>
+              <div style={{ textAlign: 'right', fontSize: 13 }}>
+                <div><span className="cl-muted">Issued: </span><b>{fmt.date(inv.issued_at)}</b></div>
+                <div><span className="cl-muted">Due: </span><b>{fmt.date(inv.due_at)}</b></div>
+                {inv.period && <div><span className="cl-muted">Period: </span><b>{inv.period}</b></div>}
+              </div>
+            </div>
+
+            <table className="ops-table" style={{ boxShadow: 'none', marginBottom: 18 }}>
+              <thead><tr><th>Order</th><th>Date</th><th>Items</th><th style={{ textAlign: 'right' }}>Amount</th></tr></thead>
+              <tbody>
+                {inv.orders.map((o) => (
+                  <tr key={o.id}>
+                    <td><b>{o.code}</b></td>
+                    <td>{fmt.date(o.created_at)}</td>
+                    <td className="cl-muted" style={{ fontSize: 13 }}>{o.description}</td>
+                    <td style={{ textAlign: 'right' }}><b>{fmt.money(o.total_cents)}</b></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            <div style={{ marginLeft: 'auto', maxWidth: 280 }}>
+              <div className="cl-between" style={{ padding: '4px 0', fontSize: 14 }}><span className="cl-muted">Subtotal</span><span>{fmt.money(inv.subtotal_cents)}</span></div>
+              <div className="cl-between" style={{ padding: '4px 0', fontSize: 14 }}><span className="cl-muted">GST (9%)</span><span>{fmt.money(inv.tax_cents)}</span></div>
+              <div style={{ height: 1, background: 'var(--gray3)', margin: '8px 0' }} />
+              <div className="cl-between" style={{ fontSize: 18, fontWeight: 900 }}><span>Total due</span><span>{fmt.money(inv.total_cents)}</span></div>
+            </div>
+          </div>
+
+          <div className="cl-between" style={{ padding: '16px 24px', borderTop: '1px solid var(--gray3)', gap: 8, flexWrap: 'wrap' }}>
+            <Button sm variant="ghost" onClick={() => printStatement(inv)}>🖨️ Print / Download</Button>
+            <div className="cl-row" style={{ gap: 8 }}>
+              {inv.status !== 'paid' && inv.status !== 'void' && <Button sm variant="ghost" onClick={() => act('send')}>📧 {inv.status === 'sent' ? 'Resend' : 'Send'}</Button>}
+              {inv.status !== 'paid' && inv.status !== 'void' && <Button sm variant="lime" onClick={() => act('paid')}>Mark paid</Button>}
+              <Button sm variant="navy" onClick={onClose}>Close</Button>
+            </div>
+          </div>
+        </>}
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+// Open a print window with a clean invoice (print → save as PDF).
+function printStatement(inv) {
+  const rows = inv.orders.map((o) => `<tr><td><b>${o.code}</b></td><td>${fmt.date(o.created_at)}</td><td style="color:#6b7280">${o.description}</td><td style="text-align:right"><b>${fmt.money(o.total_cents)}</b></td></tr>`).join('');
+  const w = window.open('', '_blank', 'width=800,height=900');
+  if (!w) return;
+  w.document.write(`<!doctype html><html><head><title>${inv.code}</title>
+    <style>body{font-family:-apple-system,Helvetica,Arial,sans-serif;color:#0e2a63;padding:40px;max-width:760px;margin:0 auto}
+    h1{font-size:26px;margin:0} .muted{color:#6b7280;font-size:13px} table{width:100%;border-collapse:collapse;margin:18px 0}
+    th{text-align:left;font-size:11px;letter-spacing:1px;text-transform:uppercase;color:#9ca3af;border-bottom:2px solid #e5e7eb;padding:8px}
+    td{padding:10px 8px;border-bottom:1px solid #eef2f7;font-size:14px} .tot{max-width:280px;margin-left:auto}
+    .row{display:flex;justify-content:space-between;padding:4px 0} .big{font-size:18px;font-weight:800;border-top:2px solid #0e2a63;margin-top:8px;padding-top:8px}</style></head>
+    <body>
+    <div style="display:flex;justify-content:space-between;align-items:flex-start">
+      <div><h1>Chase<span style="color:#84cc16">Laundry</span></h1><div class="muted">ChaseLaundry Pte Ltd · GST Reg 2026XXXXX<br>hello@chaselaundry.com</div></div>
+      <div style="text-align:right"><h1>INVOICE</h1><div style="font-weight:700">${inv.code}</div><div class="muted">${inv.status.toUpperCase()}</div></div>
+    </div>
+    <div style="display:flex;justify-content:space-between;margin-top:24px">
+      <div><div class="muted">BILL TO</div><b>${inv.business?.name || '—'}</b><div class="muted">${inv.business?.email || inv.business?.phone || ''}</div></div>
+      <div style="text-align:right" class="muted">Issued ${fmt.date(inv.issued_at)}<br>Due ${fmt.date(inv.due_at)}${inv.period ? `<br>Period ${inv.period}` : ''}</div>
+    </div>
+    <table><thead><tr><th>Order</th><th>Date</th><th>Items</th><th style="text-align:right">Amount</th></tr></thead><tbody>${rows}</tbody></table>
+    <div class="tot"><div class="row"><span class="muted">Subtotal</span><span>${fmt.money(inv.subtotal_cents)}</span></div>
+    <div class="row"><span class="muted">GST (9%)</span><span>${fmt.money(inv.tax_cents)}</span></div>
+    <div class="row big"><span>Total due</span><span>${fmt.money(inv.total_cents)}</span></div></div>
+    </body></html>`);
+  w.document.close();
+  w.focus();
+  setTimeout(() => w.print(), 300);
 }
 
 function Skel() { return <div className="ops-grid stat-grid">{[1, 2, 3, 4].map((i) => <div key={i} className="cl-skel" style={{ height: 110 }} />)}</div>; }

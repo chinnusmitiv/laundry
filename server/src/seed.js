@@ -62,14 +62,50 @@ insAddr.run({ id: addr2, user_id: cust2.id, label: 'Home', line1: '15 Tanjong Pa
 // ---- catalog ----
 // B2C: fixed retail pricing, ordered via the customer/web apps.
 const catalog = [
+  // Wash & Fold — weight-based (bundle flow), no sub-groups
   { name: 'Wash & Fold', category: 'wash_fold', unit: 'per_kg', price_cents: 350, icon: '🧺', eta_hours: 24, scope: 'b2c' },
   { name: 'Wash & Iron', category: 'wash_fold', unit: 'per_kg', price_cents: 550, icon: '👕', eta_hours: 24, scope: 'b2c' },
-  { name: 'Shirt — Dry Clean', category: 'dry_clean', unit: 'per_item', price_cents: 450, icon: '👔', eta_hours: 48, scope: 'b2c' },
-  { name: 'Suit (2pc) — Dry Clean', category: 'dry_clean', unit: 'per_item', price_cents: 1600, icon: '🕴️', eta_hours: 48, scope: 'b2c' },
-  { name: 'Dress — Dry Clean', category: 'dry_clean', unit: 'per_item', price_cents: 1200, icon: '👗', eta_hours: 48, scope: 'b2c' },
-  { name: 'Duvet (Double)', category: 'bedding', unit: 'per_item', price_cents: 1800, icon: '🛏️', eta_hours: 72, scope: 'b2c' },
-  { name: 'Ironing Only', category: 'ironing', unit: 'per_item', price_cents: 250, icon: '🔥', eta_hours: 24, scope: 'b2c' },
-  { name: 'Trainers — Deep Clean', category: 'specialty', unit: 'per_item', price_cents: 1500, icon: '👟', eta_hours: 72, scope: 'b2c' },
+
+  // Dry Cleaning — per-item, grouped by garment type (LaundryHeap-style pricelist)
+  { name: 'Shirt — Dry Clean', category: 'dry_clean', grp: 'Shirts', unit: 'per_item', price_cents: 450, icon: '👔', eta_hours: 48, scope: 'b2c' },
+  { name: 'Delicate Shirt', category: 'dry_clean', grp: 'Shirts', unit: 'per_item', price_cents: 650, icon: '👔', eta_hours: 48, scope: 'b2c' },
+  { name: 'Blouse / Top', category: 'dry_clean', grp: 'Tops', unit: 'per_item', price_cents: 750, icon: '👚', eta_hours: 48, scope: 'b2c' },
+  { name: 'Cardigan', category: 'dry_clean', grp: 'Tops', unit: 'per_item', price_cents: 1250, icon: '🧥', eta_hours: 48, scope: 'b2c' },
+  { name: 'Sweater', category: 'dry_clean', grp: 'Tops', unit: 'per_item', price_cents: 1200, icon: '🧶', eta_hours: 48, scope: 'b2c' },
+  { name: 'Trousers / Jeans', category: 'dry_clean', grp: 'Bottoms', unit: 'per_item', price_cents: 900, icon: '👖', eta_hours: 48, scope: 'b2c' },
+  { name: 'Skirt', category: 'dry_clean', grp: 'Bottoms', unit: 'per_item', price_cents: 950, icon: '👗', eta_hours: 48, scope: 'b2c' },
+  { name: 'Suit (2pc) — Dry Clean', category: 'dry_clean', grp: 'Suits', unit: 'per_item', price_cents: 1600, icon: '🕴️', eta_hours: 48, scope: 'b2c' },
+  { name: 'Suit (3pc) — Dry Clean', category: 'dry_clean', grp: 'Suits', unit: 'per_item', price_cents: 2100, icon: '🕴️', eta_hours: 48, scope: 'b2c' },
+  { name: 'Dress — Dry Clean', category: 'dry_clean', grp: 'Dresses', unit: 'per_item', price_cents: 1200, icon: '👗', eta_hours: 48, scope: 'b2c' },
+  { name: 'Evening Dress', category: 'dry_clean', grp: 'Dresses', unit: 'per_item', price_cents: 2500, icon: '👗', eta_hours: 48, scope: 'b2c' },
+  { name: 'Jumpsuit', category: 'dry_clean', grp: 'Dresses', unit: 'per_item', price_cents: 1400, icon: '👗', eta_hours: 48, scope: 'b2c' },
+  { name: 'Baju Kurung', category: 'dry_clean', grp: 'Traditional', unit: 'per_item', price_cents: 1690, icon: '🥻', eta_hours: 48, scope: 'b2c' },
+  { name: 'Cheongsam', category: 'dry_clean', grp: 'Traditional', unit: 'per_item', price_cents: 1690, icon: '🥻', eta_hours: 48, scope: 'b2c' },
+  { name: 'Saree', category: 'dry_clean', grp: 'Traditional', unit: 'per_item', price_cents: 1800, icon: '🥻', eta_hours: 48, scope: 'b2c' },
+  { name: 'Jacket / Blazer', category: 'dry_clean', grp: 'Outerwear', unit: 'per_item', price_cents: 1345, icon: '🧥', eta_hours: 48, scope: 'b2c' },
+  { name: 'Overcoat', category: 'dry_clean', grp: 'Outerwear', unit: 'per_item', price_cents: 2500, icon: '🧥', eta_hours: 48, scope: 'b2c' },
+  { name: 'Tie', category: 'dry_clean', grp: 'Accessories', unit: 'per_item', price_cents: 700, icon: '👔', eta_hours: 48, scope: 'b2c' },
+  { name: 'Scarf', category: 'dry_clean', grp: 'Accessories', unit: 'per_item', price_cents: 900, icon: '🧣', eta_hours: 48, scope: 'b2c' },
+
+  // Ironing Only — per-item, grouped
+  { name: 'Ironing Only', category: 'ironing', grp: 'Shirts', unit: 'per_item', price_cents: 250, icon: '🔥', eta_hours: 24, scope: 'b2c' },
+  { name: 'Shirt — Iron', category: 'ironing', grp: 'Shirts', unit: 'per_item', price_cents: 300, icon: '👔', eta_hours: 24, scope: 'b2c' },
+  { name: 'Trousers — Iron', category: 'ironing', grp: 'Bottoms', unit: 'per_item', price_cents: 350, icon: '👖', eta_hours: 24, scope: 'b2c' },
+  { name: 'Dress — Iron', category: 'ironing', grp: 'Dresses', unit: 'per_item', price_cents: 500, icon: '👗', eta_hours: 24, scope: 'b2c' },
+  { name: 'Bed Sheet — Iron', category: 'ironing', grp: 'Home', unit: 'per_item', price_cents: 400, icon: '🛏️', eta_hours: 24, scope: 'b2c' },
+
+  // Duvets & Bulky Items — per-item, grouped
+  { name: 'Duvet (Single)', category: 'bedding', grp: 'Duvets', unit: 'per_item', price_cents: 1500, icon: '🛏️', eta_hours: 72, scope: 'b2c' },
+  { name: 'Duvet (Double)', category: 'bedding', grp: 'Duvets', unit: 'per_item', price_cents: 1800, icon: '🛏️', eta_hours: 72, scope: 'b2c' },
+  { name: 'Duvet (King)', category: 'bedding', grp: 'Duvets', unit: 'per_item', price_cents: 2200, icon: '🛏️', eta_hours: 72, scope: 'b2c' },
+  { name: 'Pillow', category: 'bedding', grp: 'Bedding', unit: 'per_item', price_cents: 900, icon: '🛌', eta_hours: 72, scope: 'b2c' },
+  { name: 'Blanket', category: 'bedding', grp: 'Bedding', unit: 'per_item', price_cents: 1600, icon: '🧣', eta_hours: 72, scope: 'b2c' },
+  { name: 'Curtains (per panel)', category: 'bedding', grp: 'Curtains', unit: 'per_item', price_cents: 2000, icon: '🪟', eta_hours: 72, scope: 'b2c' },
+
+  // Specialty — per-item
+  { name: 'Trainers — Deep Clean', category: 'specialty', grp: 'Footwear', unit: 'per_item', price_cents: 1500, icon: '👟', eta_hours: 72, scope: 'b2c' },
+  { name: 'Handbag — Clean', category: 'specialty', grp: 'Bags', unit: 'per_item', price_cents: 3500, icon: '👜', eta_hours: 72, scope: 'b2c' },
+
   // B2B: corporate contract catalog — linens are itemised, towels are billed by the bag. Default prices, per-client rates can override.
   { name: 'Hotel Bedsheet', category: 'linens', unit: 'per_item', price_cents: 180, icon: '🛏️', eta_hours: 24, scope: 'b2b' },
   { name: 'Hotel Pillowcase', category: 'linens', unit: 'per_item', price_cents: 60, icon: '🛏️', eta_hours: 24, scope: 'b2b' },
@@ -79,9 +115,9 @@ const catalog = [
   { name: 'Nail Salon Towels (per bag)', category: 'towels', unit: 'per_bag', price_cents: 2000, icon: '💅', eta_hours: 24, scope: 'b2b' },
   { name: 'Massage Parlour Towels (per bag)', category: 'towels', unit: 'per_bag', price_cents: 2200, icon: '💆', eta_hours: 24, scope: 'b2b' },
 ];
-const insCat = db.prepare('INSERT INTO catalog (id,name,category,unit,price_cents,icon,eta_hours,scope) VALUES (@id,@name,@category,@unit,@price_cents,@icon,@eta_hours,@scope)');
+const insCat = db.prepare('INSERT INTO catalog (id,name,category,unit,price_cents,icon,eta_hours,scope,grp) VALUES (@id,@name,@category,@unit,@price_cents,@icon,@eta_hours,@scope,@grp)');
 const catIds = {};
-for (const c of catalog) { const cid = id('cat'); catIds[c.name] = cid; insCat.run({ id: cid, ...c }); }
+for (const c of catalog) { const cid = id('cat'); catIds[c.name] = cid; insCat.run({ id: cid, grp: null, ...c }); }
 
 // ---- plans ----
 const plans = [

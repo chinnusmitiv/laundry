@@ -24,7 +24,7 @@ export default function App() {
 }
 
 function CustomerApp() {
-  const [tab, setTab] = useState('home');
+  const [tab, setTab] = useState(() => new URLSearchParams(location.search).get('tab') || 'home');
   const [summary, setSummary] = useState(null);
   const [orders, setOrders] = useState([]);
   const [notifs, setNotifs] = useState([]);
@@ -34,6 +34,12 @@ function CustomerApp() {
   const [notifOpen, setNotifOpen] = useState(false);
 
   const openOrderFlow = (seed = null) => { setFlowSeed(seed); setFlowOpen(true); };
+
+  // deep-link: /?book=1 opens the booking flow (optionally at ?step=N)
+  useEffect(() => {
+    const p = new URLSearchParams(location.search);
+    if (p.get('book')) openOrderFlow(p.get('step') ? { step: Number(p.get('step')) } : null);
+  }, []);
 
   const load = useCallback(async () => {
     const [s, o, n] = await Promise.all([
@@ -59,7 +65,7 @@ function CustomerApp() {
         left={<Logo size={20} theme="dark" />}
         right={
           <button onClick={() => setNotifOpen(true)} style={{ position: 'relative', color: '#fff', fontSize: 22 }}>
-            🔔{unread > 0 && <span style={{ position: 'absolute', top: -4, right: -6, background: 'var(--lime)', color: 'var(--navy)', fontSize: 10, fontWeight: 800, minWidth: 16, height: 16, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 4px' }}>{unread}</span>}
+            🔔{unread > 0 && <span style={{ position: 'absolute', top: -4, right: -6, background: 'var(--lime)', color: '#fff', fontSize: 10, fontWeight: 800, minWidth: 16, height: 16, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 4px' }}>{unread}</span>}
           </button>
         }
       />
@@ -217,34 +223,42 @@ function Home({ summary, orders, onOpenOrder, onOrder, onTab, onReload }) {
 
       <AddressPicker open={addrPickerOpen} onClose={() => setAddrPickerOpen(false)} summary={summary} onReload={onReload} />
 
-      {/* active orders, or empty state */}
-      {active.length > 0 ? (
+      {/* Laundryheap-style hero: headline · Schedule pickup CTA · star trust bar */}
+      <Card style={{ marginBottom: 14, padding: 22 }}>
+        <div style={{ fontSize: 26, fontWeight: 900, lineHeight: 1.15, letterSpacing: '-.5px', color: 'var(--navy)', marginBottom: 8 }}>
+          Take back your time.<br />Leave the laundry to us.
+        </div>
+        <div className="cl-muted" style={{ fontSize: 14, marginBottom: 16 }}>
+          Laundry & dry cleaning with free 48-hour delivery, right to your door.
+        </div>
+        <Button variant="lime" onClick={onOrder}>Schedule your pickup →</Button>
+
+        {/* rated-excellent star bar */}
+        <div className="cl-row" style={{ gap: 8, marginTop: 16, justifyContent: 'center' }}>
+          <span className="lh-stars" style={{ fontSize: 15 }}>★★★★★</span>
+          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--navy)' }}>Rated Excellent</span>
+          <span className="cl-muted" style={{ fontSize: 12 }}>· 5,243 reviews</span>
+        </div>
+
+        {/* guarantees */}
+        <div className="cl-divider" />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {['Free collection & 48h delivery', 'Best price guaranteed', 'No minimum order'].map((t) => (
+            <span key={t} className="cl-row" style={{ gap: 8, fontSize: 13, fontWeight: 700, color: 'var(--navy)' }}>
+              <span style={{ width: 18, height: 18, borderRadius: 18, background: 'var(--lime)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, flexShrink: 0 }}>✓</span>
+              {t}
+            </span>
+          ))}
+        </div>
+      </Card>
+
+      {/* active orders */}
+      {active.length > 0 && (
         <div style={{ marginBottom: 18 }}>
           <div className="cl-eyebrow" style={{ marginBottom: 10 }}>Active orders</div>
           {active.map((o) => <OrderRow key={o.id} o={o} onClick={() => onOpenOrder(o.id)} />)}
         </div>
-      ) : (
-        <div style={{ fontSize: 19, fontWeight: 700, color: 'var(--navy)', marginBottom: 20 }}>Schedule your first order.</div>
       )}
-
-      {/* hero: illustration + trust checklist */}
-      <Card style={{ marginBottom: 14 }}>
-        <div className="cl-row" style={{ gap: 14 }}>
-          <div style={{
-            width: 68, height: 68, borderRadius: 16, flexShrink: 0, fontSize: 32,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            background: 'linear-gradient(135deg, var(--navy), var(--navy3))',
-          }}>🚐</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {['48h turnaround', 'Best price guaranteed', 'No minimum order'].map((t) => (
-              <span key={t} className="cl-row" style={{ gap: 7, fontSize: 13, fontWeight: 700, color: 'var(--navy)' }}>
-                <span style={{ width: 17, height: 17, borderRadius: 17, background: 'var(--lime)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, flexShrink: 0 }}>✓</span>
-                {t}
-              </span>
-            ))}
-          </div>
-        </div>
-      </Card>
 
       {/* demo: spawn a live-tracking order */}
       <Card onClick={async () => { const o = await api.post(`/api/demo/customers/${CUSTOMER_ID}/spawn-tracking`); onOpenOrder(o.id); }}
@@ -331,9 +345,9 @@ function Home({ summary, orders, onOpenOrder, onOrder, onTab, onReload }) {
 
 function HowItWorksSheet({ open, onClose }) {
   const steps = [
-    { icon: '📅', title: 'Schedule a pickup', body: 'Pick a time that works for you — we come to your door.' },
-    { icon: '🧺', title: 'We wash, dry-clean or iron', body: 'Your items are tagged, tracked and cared for at our facility.' },
-    { icon: '🚚', title: 'Delivered back to you', body: 'Fresh and folded, back at your door within 48h.' },
+    { icon: '🛍️', title: 'Book it & bag it', body: 'Pick a pickup slot and bag up your laundry — we come to your door.' },
+    { icon: '🧺', title: 'Cleaned with care, locally', body: 'Your items are tagged, tracked and cared for at our local facility.' },
+    { icon: '🚚', title: 'Free delivery, fresh results', body: 'Fresh and folded, delivered back to your door within 48h.' },
   ];
   return (
     <Sheet open={open} onClose={onClose} title="How ChaseLaundry works">
@@ -398,177 +412,247 @@ function OrderRow({ o, onClick }) {
   );
 }
 
-// ─────────────────────────────────────── PRICES (read-only catalog browse)
-function Prices({ onSchedule, onTab }) {
-  const [catalog, setCatalog] = useState(null);
-  const [overviewCat, setOverviewCat] = useState(null); // active category key, or null when closed
-  useEffect(() => { api.get('/api/catalog').then(setCatalog); }, []);
+// ─────────────────────────────────────── PRICES (Laundryheap-style pricelist)
+// Wash & Fold is the primary, weight-based service (Mixed / Separate bundles);
+// every other service follows the per-item pricelist flow.
+// Reusable Laundryheap-style service picker: service tabs + info header +
+// Wash & Fold bundle flow / per-item grouped pricelist. Shared by the Prices
+// tab and the booking flow's "what needs cleaning" step so both feel identical.
+function ServicePicker({ catalog, cart, setCart, initialCat, onAskTeam }) {
+  const [cat, setCat] = useState(() => initialCat || 'wash_fold');
+  const [infoOpen, setInfoOpen] = useState(false);
+  useEffect(() => { setInfoOpen(false); }, [cat]);
 
   const categories = useMemo(() => {
-    if (!catalog) return [];
     const present = new Set(catalog.map((c) => c.category));
     return CATEGORY_ORDER.filter((k) => present.has(k));
   }, [catalog]);
 
+  const setItem = (id, patch) => setCart((c) => ({ ...c, [id]: { ...c[id], ...patch } }));
+  const items = catalog.filter((c) => c.category === cat);
+  const headIcon = items[0]?.icon || '🧺';
+
+  if (!catalog.length) return <Loading />;
+
   return (
-    <div style={{ padding: 18 }}>
-      <div style={{ fontSize: 22, fontWeight: 900, marginBottom: 4 }}>Prices</div>
-      <p className="cl-muted" style={{ fontSize: 13, marginBottom: 16 }}>Straightforward pricing, no surprises.</p>
-      {!catalog ? <Loading /> : <>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-          {categories.map((cat) => {
-            const items = catalog.filter((c) => c.category === cat);
-            const min = Math.min(...items.map((c) => c.price_cents));
-            const unit = items[0].unit;
-            return (
-              <Card key={cat} onClick={() => setOverviewCat(cat)} style={{ cursor: 'pointer', display: 'flex', flexDirection: 'column', height: '100%' }}>
-                <div style={{ width: 54, height: 54, borderRadius: 54, background: CATEGORY_TINT[cat], display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, margin: '0 auto 10px' }}>{items[0].icon}</div>
-                <div style={{ fontWeight: 800, fontSize: 14, textAlign: 'center' }}>{CATEGORY_LABEL[cat]}</div>
-                <div className="cl-muted" style={{ fontSize: 11, textAlign: 'center', marginTop: 4 }}>{CATEGORY_DESC[cat]}</div>
-                <div className="cl-row" style={{ gap: 4, flexWrap: 'wrap', justifyContent: 'center', marginTop: 8 }}>
-                  {(CATEGORY_CHIPS[cat] || []).slice(0, 2).map((t) => <Chip key={t} variant="gray">{t}</Chip>)}
-                </div>
-                <div className="cl-between" style={{ marginTop: 'auto', paddingTop: 10 }}>
-                  <div style={{ background: 'var(--light)', borderRadius: 10, padding: '8px 10px', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <div>
-                      <div style={{ fontSize: 9, color: 'var(--gray2)', fontWeight: 700 }}>Price per {unit === 'per_kg' ? 'weight' : 'item'}</div>
-                      <div style={{ fontWeight: 800, color: 'var(--navy)', fontSize: 13 }}>from {fmt.money(min)}</div>
-                    </div>
-                    <span style={{ color: 'var(--gray2)' }}>›</span>
-                  </div>
-                </div>
-              </Card>
-            );
-          })}
-        </div>
+    <>
+      {/* service tabs — Wash & Fold first / main */}
+      <div className="cl-row cl-hscroll" style={{ gap: 8, margin: '0 -18px 16px', padding: '0 18px' }}>
+        {categories.map((k) => (
+          <button key={k} onClick={() => setCat(k)} style={{
+            flexShrink: 0, padding: '9px 16px', borderRadius: 999, fontWeight: 800, fontSize: 13, whiteSpace: 'nowrap',
+            background: cat === k ? 'var(--navy)' : '#fff', color: cat === k ? '#fff' : 'var(--gray)',
+            boxShadow: cat === k ? 'none' : 'var(--shadow-sm)',
+          }}>{CATEGORY_LABEL[k]}</button>
+        ))}
+      </div>
 
-        <Card style={{ marginTop: 20 }}>
-          {[
-            ['⏱️', '48h turnaround'],
-            ['🚫', 'No minimum order'],
-            ['🏷️', 'Service fee from S$3.99'],
-          ].map(([icon, label], i, arr) => (
-            <div key={label} className="cl-row" style={{ gap: 12, marginBottom: i < arr.length - 1 ? 10 : 0 }}>
-              <span style={{ width: 34, height: 34, borderRadius: 34, background: 'var(--lime-pale)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, flexShrink: 0 }}>{icon}</span>
-              <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--navy)' }}>{label}</span>
+      {/* service info header */}
+      <Card style={{ marginBottom: 16 }}>
+        <div className="cl-between" style={{ alignItems: 'flex-start', gap: 12 }}>
+          <div className="cl-row" style={{ gap: 12 }}>
+            <div style={{ width: 44, height: 44, borderRadius: 44, background: CATEGORY_TINT[cat], display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, flexShrink: 0 }}>{headIcon}</div>
+            <div>
+              <div style={{ fontWeight: 900, fontSize: 17 }}>{CATEGORY_LABEL[cat]}</div>
+              <div className="cl-muted" style={{ fontSize: 12, marginTop: 2 }}>{CATEGORY_DESC[cat]}</div>
             </div>
+          </div>
+          <button onClick={() => setInfoOpen((x) => !x)} style={{ fontSize: 12, fontWeight: 800, color: 'var(--navy)', flexShrink: 0 }}>{infoOpen ? 'Less' : 'Learn more'}</button>
+        </div>
+        <div className="cl-row" style={{ gap: 6, flexWrap: 'wrap', marginTop: 12 }}>
+          {(CATEGORY_CHIPS[cat] || []).map((t, i, a) => (
+            <React.Fragment key={t}>
+              <Chip variant="gray">{t}</Chip>
+              {i < a.length - 1 && <span style={{ color: 'var(--gray2)', fontWeight: 800 }}>+</span>}
+            </React.Fragment>
           ))}
-        </Card>
+        </div>
+        {infoOpen && <div className="cl-muted" style={{ fontSize: 12, marginTop: 12, lineHeight: 1.5 }}>{CATEGORY_INFO[cat]}</div>}
+      </Card>
 
-        <ServiceOverviewSheet
-          open={!!overviewCat} initialCategory={overviewCat} catalog={catalog}
-          onClose={() => setOverviewCat(null)}
-          onSchedule={(cart) => { setOverviewCat(null); onSchedule(cart); }}
-          onAskTeam={() => { setOverviewCat(null); onTab('support'); }}
-        />
-      </>}
-    </div>
+      {/* body: bundle flow for Wash & Fold, per-item pricelist for the rest */}
+      {cat === 'wash_fold'
+        ? <WashFoldPricelist items={items} cart={cart} setItem={setItem} />
+        : <ItemPricelist items={items} cart={cart} setItem={setItem} onAskTeam={onAskTeam} />}
+    </>
   );
 }
 
-// per-category browse page: hero band + itemized pricelist + "schedule a collection" footer
-function ServiceOverviewSheet({ open, initialCategory, catalog, onClose, onSchedule, onAskTeam }) {
-  const [cat, setCat] = useState(initialCategory);
-  const [cart, setCart] = useState({});
-  const [infoOpen, setInfoOpen] = useState(false);
+function Prices({ onSchedule, onTab }) {
+  const [catalog, setCatalog] = useState(null);
+  const [cart, setCart] = useState({}); // catalogId -> { qty | weight }
+  useEffect(() => { api.get('/api/catalog').then(setCatalog); }, []);
 
-  useEffect(() => { if (open) { setCat(initialCategory); setCart({}); setInfoOpen(false); } }, [open, initialCategory]);
+  if (!catalog) return <div style={{ padding: 18 }}><Loading /></div>;
 
-  const categories = useMemo(() => {
-    if (!catalog.length) return [];
-    const present = new Set(catalog.map((c) => c.category));
-    return CATEGORY_ORDER.filter((k) => present.has(k));
-  }, [catalog]);
-
-  const items = catalog.filter((c) => c.category === cat);
-  const unit = items[0]?.unit;
-  const setItem = (id, patch) => setCart((c) => ({ ...c, [id]: { ...c[id], ...patch } }));
   const selected = Object.entries(cart).filter(([, v]) => (v.qty || v.weight) > 0);
   const totalCents = selected.reduce((sum, [id, v]) => {
     const c = catalog.find((x) => x.id === id);
     return sum + (c ? c.price_cents * (v.qty || v.weight || 0) : 0);
   }, 0);
-  const asCart = () => Object.fromEntries(selected);
-
-  if (!cat) return null;
+  const book = () => selected.length && onSchedule(Object.fromEntries(selected));
+  const initialCat = new URLSearchParams(location.search).get('cat') || 'wash_fold';
 
   return (
-    <Sheet open={open} onClose={onClose} title={CATEGORY_LABEL[cat]}>
-      <div className="cl-row cl-hscroll" style={{ gap: 10, marginBottom: 16 }}>
-        {categories.map((k) => {
-          const first = catalog.find((c) => c.category === k);
-          return (
-            <button key={k} onClick={() => setCat(k)} style={{
-              width: 46, height: 46, borderRadius: 46, flexShrink: 0, fontSize: 20,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              background: CATEGORY_TINT[k], border: cat === k ? '2px solid var(--navy)' : '2px solid transparent',
-            }}>{first?.icon}</button>
-          );
-        })}
-      </div>
+    <div style={{ padding: 18, paddingBottom: 0 }}>
+      <div style={{ fontSize: 22, fontWeight: 900, marginBottom: 4 }}>Prices &amp; services</div>
+      <p className="cl-muted" style={{ fontSize: 13, marginBottom: 16 }}>Straightforward pricing, no surprises.</p>
 
-      <div style={{ background: CATEGORY_TINT[cat], borderRadius: 'var(--radius)', padding: 20, marginBottom: 18 }}>
-        <div className="cl-between" style={{ gap: 12, alignItems: 'flex-start' }}>
-          <div>
-            <div style={{ fontWeight: 900, fontSize: 20, color: 'var(--navy)', marginBottom: 8 }}>{CATEGORY_LABEL[cat]}</div>
-            <div style={{ fontSize: 13, color: 'var(--navy)', opacity: .8, marginBottom: 14 }}>{CATEGORY_DESC[cat]}</div>
-            <Button sm variant="navy" onClick={() => setInfoOpen((x) => !x)}>{infoOpen ? 'Show less' : 'Learn more'}</Button>
+      <ServicePicker catalog={catalog} cart={cart} setCart={setCart} initialCat={initialCat} onAskTeam={() => onTab('support')} />
+
+      {/* guarantees */}
+      <Card style={{ marginTop: 4 }}>
+        {[['⏱️', '48h turnaround'], ['🚫', 'No minimum order'], ['🚚', 'Free collection & delivery']].map(([icon, label], i, arr) => (
+          <div key={label} className="cl-row" style={{ gap: 12, marginBottom: i < arr.length - 1 ? 10 : 0 }}>
+            <span style={{ width: 34, height: 34, borderRadius: 34, background: 'var(--lime-pale)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, flexShrink: 0 }}>{icon}</span>
+            <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--navy)' }}>{label}</span>
           </div>
-          <span style={{ fontSize: 44, flexShrink: 0 }}>{items[0]?.icon}</span>
-        </div>
-        {infoOpen && <div style={{ fontSize: 12, color: 'var(--navy)', marginTop: 14, lineHeight: 1.5 }}>{CATEGORY_INFO[cat]}</div>}
-      </div>
+        ))}
+      </Card>
 
-      <div className="cl-between" style={{ marginBottom: 10 }}>
-        <div style={{ fontWeight: 900, fontSize: 15 }}>Pricelist</div>
-        <span className="cl-muted" style={{ fontSize: 12 }}>Price per {unit === 'per_kg' ? 'weight' : 'item'}</span>
+      {/* sticky BOOK NOW bar */}
+      <div style={{ position: 'sticky', bottom: 12, marginTop: 16, zIndex: 5 }}>
+        <div style={{ background: 'var(--navy)', borderRadius: 16, padding: '12px 14px 14px', boxShadow: '0 10px 24px rgba(14,42,99,.28)' }}>
+          {selected.length > 0 && (
+            <div className="cl-between" style={{ marginBottom: 8, color: '#fff' }}>
+              <span style={{ fontSize: 12, color: 'rgba(255,255,255,.7)' }}>Estimated</span>
+              <span style={{ fontWeight: 900, fontSize: 15 }}>{fmt.money(totalCents)}</span>
+            </div>
+          )}
+          <Button variant="lime" disabled={!selected.length} onClick={book}>Book now →</Button>
+        </div>
       </div>
-      {items.map((c) => {
-        const v = cart[c.id] || {};
-        const added = (c.unit === 'per_kg' ? v.weight : v.qty) > 0;
+      <div style={{ height: 12 }} />
+    </div>
+  );
+}
+
+// Wash & Fold — weight-based bundles (Mixed 6kg / Separate 12kg) + additional kg.
+function WashFoldPricelist({ items, cart, setItem, setCart }) {
+  const base = items.find((c) => /fold/i.test(c.name)) || items[0]; // "Wash & Fold" per-kg rate
+  const perKg = base.price_cents;
+  const BUNDLES = [
+    { key: 'mixed', name: 'Mixed Wash & Fold', desc: 'All colours washed together.', kg: 6 },
+    { key: 'separate', name: 'Separate Wash & Fold', desc: 'Lights and darks washed separately.', kg: 12 },
+  ];
+  const cur = cart[base.id]?.weight || 0;
+  const activeKg = cur >= 12 ? 12 : cur >= 6 ? 6 : 0;
+  const extra = Math.max(0, cur - activeKg);
+
+  const pick = (kg) => setItem(base.id, { weight: kg });
+  const setExtra = (n) => activeKg && setItem(base.id, { weight: activeKg + Math.max(0, n) });
+
+  return (
+    <>
+      {BUNDLES.map((b) => {
+        const on = activeKg === b.kg;
         return (
-          <Card key={c.id} style={{ marginBottom: 10, background: added ? 'var(--lime-pale)' : '#fff', border: added ? '1.5px solid var(--lime-d)' : '1.5px solid transparent' }}>
-            <div className="cl-between">
+          <Card key={b.key} onClick={() => pick(b.kg)}
+            style={{ marginBottom: 12, cursor: 'pointer', border: on ? '2px solid var(--navy)' : '2px solid transparent', background: on ? 'var(--lime-pale)' : '#fff' }}>
+            <div className="cl-between" style={{ gap: 12 }}>
               <div>
-                <div style={{ fontWeight: 700, fontSize: 14 }}>{c.name}</div>
-                <div className="cl-muted" style={{ fontSize: 12, marginTop: 2 }}>{fmt.money(c.price_cents)} {c.unit === 'per_kg' ? '/ kg' : '/ item'} · {etaLabel(c.eta_hours)}</div>
+                <div style={{ fontWeight: 800, fontSize: 15 }}>{b.name}</div>
+                <div className="cl-muted" style={{ fontSize: 12, marginTop: 2 }}>{b.desc}</div>
               </div>
-              {!added
-                ? <Button sm variant="ghost" onClick={() => setItem(c.id, c.unit === 'per_kg' ? { weight: 1 } : { qty: 1 })}>+ Add</Button>
-                : (c.unit === 'per_kg'
-                  ? <Stepper value={v.weight || 0} step={0.5} unit="kg" onChange={(weight) => setItem(c.id, { weight })} />
-                  : <Stepper value={v.qty || 0} step={1} onChange={(qty) => setItem(c.id, { qty })} />)}
+              <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                <div style={{ fontWeight: 900, fontSize: 15 }}>{fmt.money(perKg * b.kg)}</div>
+                <div className="cl-muted" style={{ fontSize: 11 }}>/ {b.kg}kg</div>
+              </div>
             </div>
           </Card>
         );
       })}
 
-      {unit === 'per_kg' && (
-        <Card style={{ marginBottom: 18, background: 'var(--light)' }}>
-          <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 8 }}>Not sure how much you have?</div>
-          <div className="cl-muted" style={{ fontSize: 12, marginBottom: 8 }}>One load of 6kg is about:</div>
-          <div className="cl-row" style={{ gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
-            {['12 shirts', '3 trousers', '7 underwear', '7 pairs of socks'].map((t) => <Chip key={t} variant="gray">{t}</Chip>)}
-          </div>
-          <div className="cl-muted" style={{ fontSize: 12 }}>We price your order based on how much it weighs — no need to worry if it's slightly over.</div>
-        </Card>
-      )}
-
-      <Card style={{ marginBottom: 18, cursor: 'pointer' }} onClick={onAskTeam}>
-        <div className="cl-between">
-          <div><div style={{ fontWeight: 800, fontSize: 14 }}>Can't find your item?</div><div style={{ fontSize: 12, color: 'var(--navy)', fontWeight: 700, marginTop: 2 }}>Ask our team</div></div>
-          <span style={{ fontSize: 20 }}>→</span>
+      {/* additional weight — "send as much as you need" */}
+      <Card style={{ marginBottom: 12, background: 'var(--lime-pale)' }}>
+        <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 4 }}>What if I have more?</div>
+        <div className="cl-muted" style={{ fontSize: 12, marginBottom: activeKg ? 12 : 0 }}>
+          You can send as much as you need. Each additional kg costs {fmt.money(perKg)}.
         </div>
+        {activeKg ? (
+          <div className="cl-between">
+            <span style={{ fontWeight: 700, fontSize: 13 }}>Additional weight</span>
+            <Stepper value={extra} step={1} unit="kg" onChange={setExtra} />
+          </div>
+        ) : null}
       </Card>
 
-      <div style={{ position: 'sticky', bottom: -20, background: 'var(--light)', margin: '0 -20px -20px', padding: 20 }}>
-        <div className="cl-between" style={{ marginBottom: 10 }}>
-          <span className="cl-muted" style={{ fontSize: 13 }}>Estimated price</span>
-          <span style={{ fontWeight: 900, fontSize: 16 }}>{fmt.money(totalCents)}</span>
+      {/* what 6kg looks like */}
+      <Card style={{ marginBottom: 12, background: 'var(--light)' }}>
+        <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 8 }}>See what 6kg looks like</div>
+        <div className="cl-row" style={{ gap: 6, flexWrap: 'wrap' }}>
+          {['12 shirts', '3 trousers', '7 underwear', '7 pairs of socks'].map((t) => <Chip key={t} variant="gray">{t}</Chip>)}
         </div>
-        <Button variant="lime" disabled={!selected.length} onClick={() => onSchedule(asCart())}>Schedule a collection →</Button>
-      </div>
-    </Sheet>
+      </Card>
+    </>
+  );
+}
+
+// Per-item pricelist — garment sub-group tabs + name … price rows (Dry Cleaning, Ironing, Duvets…).
+function ItemPricelist({ items, cart, setItem, onAskTeam }) {
+  // groups in a sensible garment order (Shirts → Tops → … → Accessories), unknowns last
+  const groups = useMemo(() => {
+    const ORDER = ['Shirts', 'Tops', 'Bottoms', 'Suits', 'Dresses', 'Traditional', 'Outerwear', 'Accessories', 'Home', 'Duvets', 'Bedding', 'Curtains', 'Footwear', 'Bags'];
+    const present = [...new Set(items.map((c) => c.grp || 'All'))];
+    return present.sort((a, b) => {
+      const ia = ORDER.indexOf(a), ib = ORDER.indexOf(b);
+      return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+    });
+  }, [items]);
+  const [grp, setGrp] = useState(groups[0]);
+  useEffect(() => { if (!groups.includes(grp)) setGrp(groups[0]); }, [groups, grp]);
+
+  const shown = items.filter((c) => (c.grp || 'All') === grp);
+  const addedInGroup = (g) => items.filter((c) => (c.grp || 'All') === g && (cart[c.id]?.qty || 0) > 0).length;
+
+  return (
+    <>
+      {/* garment group tabs */}
+      {groups.length > 1 && (
+        <div className="cl-row cl-hscroll" style={{ gap: 18, marginBottom: 14, margin: '0 -18px 14px', padding: '0 18px 2px', borderBottom: '1px solid var(--gray3)' }}>
+          {groups.map((g) => {
+            const on = g === grp, n = addedInGroup(g);
+            return (
+              <button key={g} onClick={() => setGrp(g)} style={{
+                flexShrink: 0, padding: '6px 0 10px', fontWeight: on ? 800 : 600, fontSize: 14, whiteSpace: 'nowrap',
+                color: on ? 'var(--navy)' : 'var(--gray2)', borderBottom: on ? '2px solid var(--navy)' : '2px solid transparent',
+              }}>{g}{n > 0 ? ` · ${n}` : ''}</button>
+            );
+          })}
+        </div>
+      )}
+
+      <div style={{ fontWeight: 900, fontSize: 15, marginBottom: 10 }}>{grp}</div>
+      <Card style={{ marginBottom: 12, padding: 0, overflow: 'hidden' }}>
+        {shown.map((c, i) => {
+          const v = cart[c.id] || {};
+          const qty = v.qty || 0;
+          return (
+            <div key={c.id} className="cl-between" style={{ padding: '14px 16px', borderBottom: i < shown.length - 1 ? '1px solid var(--gray3)' : 'none', gap: 12, background: qty > 0 ? 'var(--lime-pale)' : '#fff' }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 14 }}>{c.name}</div>
+                <div className="cl-muted" style={{ fontSize: 11, marginTop: 2 }}>{etaLabel(c.eta_hours)}</div>
+              </div>
+              <div className="cl-row" style={{ gap: 12, flexShrink: 0 }}>
+                <span style={{ fontWeight: 800, fontSize: 14 }}>{fmt.money(c.price_cents)}</span>
+                {qty > 0
+                  ? <Stepper value={qty} step={1} onChange={(q) => setItem(c.id, { qty: q })} />
+                  : <Button sm variant="ghost" onClick={() => setItem(c.id, { qty: 1 })}>+ Add</Button>}
+              </div>
+            </div>
+          );
+        })}
+      </Card>
+
+      {onAskTeam && (
+        <Card style={{ marginBottom: 12, cursor: 'pointer' }} onClick={onAskTeam}>
+          <div className="cl-between">
+            <div><div style={{ fontWeight: 800, fontSize: 14 }}>Can't find your item?</div><div style={{ fontSize: 12, color: 'var(--navy)', fontWeight: 700, marginTop: 2 }}>Ask our team</div></div>
+            <span style={{ fontSize: 20 }}>→</span>
+          </div>
+        </Card>
+      )}
+    </>
   );
 }
 
@@ -646,7 +730,7 @@ function OrderDetail({ orderId, onClose }) {
       {!o ? <Loading /> : <>
         <div className="cl-between" style={{ marginBottom: 14 }}>
           <StatusPill status={o.status} label={o.status_label} />
-          <span style={{ fontWeight: 900 }}>{fmt.money(o.total_cents)} {o.payment_status === 'paid' ? <Chip>paid</Chip> : <Chip variant="gray">unpaid</Chip>}</span>
+          <span style={{ fontWeight: 900 }}>{fmt.money(o.total_cents)} <PayChip status={o.payment_status} /></span>
         </div>
 
         {showMap && <div style={{ marginBottom: 14 }}>
@@ -711,7 +795,17 @@ function OrderDetail({ orderId, onClose }) {
           <Line l={<b>Total</b>} v={<b>{fmt.money(o.total_cents)}</b>} />
         </Card>
 
-        {o.payment_status !== 'paid' && o.status !== 'cancelled' &&
+        {o.payment_status === 'authorized' && o.status !== 'cancelled' &&
+          <Card style={{ marginBottom: 10, background: 'var(--lime-pale)' }}>
+            <div className="cl-row" style={{ gap: 10 }}>
+              <span style={{ fontSize: 20 }}>💳</span>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: 14 }}>{fmt.money(o.hold_amount_cents || o.total_cents)} held on your card</div>
+                <div className="cl-muted" style={{ fontSize: 12 }}>You're only charged once your order is delivered.</div>
+              </div>
+            </div>
+          </Card>}
+        {['pending', 'voided'].includes(o.payment_status) && o.status !== 'cancelled' &&
           <Button variant="lime" style={{ marginBottom: 10 }} onClick={() => setPayOpen(true)}>Pay {fmt.money(o.total_cents)}</Button>}
 
         <PaymentSheet open={payOpen} onClose={() => setPayOpen(false)} amountCents={o.total_cents}
@@ -755,10 +849,10 @@ function Timeline({ status }) {
     <div>
       {visible.map((s) => {
         const done = STATUS_FLOW.indexOf(s) <= idx;
-        const current = s === status || (s === 'processing' && ['at_facility', 'ready'].includes(status)) || (s === 'completed' && status === 'delivered');
+        const current = s === status || (s === 'processing' && ['at_facility', 'confirmed', 'ready'].includes(status)) || (s === 'completed' && status === 'delivered');
         return (
           <div key={s} className="cl-row" style={{ gap: 12, padding: '6px 0' }}>
-            <div style={{ width: 22, height: 22, borderRadius: 22, flexShrink: 0, background: done ? 'var(--lime)' : 'var(--gray3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: 'var(--navy)', fontWeight: 900 }}>{done ? '✓' : ''}</div>
+            <div style={{ width: 22, height: 22, borderRadius: 22, flexShrink: 0, background: done ? 'var(--lime)' : 'var(--gray3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: '#fff', fontWeight: 900 }}>{done ? '✓' : ''}</div>
             <span style={{ fontWeight: current ? 800 : 600, color: done ? 'var(--navy)' : 'var(--gray2)' }}>{STATUS_LABEL[s]}</span>
           </div>
         );
@@ -917,44 +1011,7 @@ function OrderFlow({ open, seed, onClose, onPlaced, summary }) {
 
       {step === 2 && <>
         <p className="cl-muted" style={{ fontSize: 13, marginBottom: 14 }}>What needs cleaning?</p>
-        {catalog.map((c) => {
-          const v = cart[c.id] || {};
-          const added = (c.unit === 'per_kg' ? v.weight : v.qty) > 0;
-          return (
-            <Card key={c.id} style={{ marginBottom: 10, background: added ? 'var(--lime-pale)' : '#fff', border: added ? '1.5px solid var(--lime-d)' : '1.5px solid transparent' }}>
-              <div className="cl-between" style={{ alignItems: 'flex-start', gap: 10 }}>
-                <div className="cl-row" style={{ gap: 10 }}>
-                  <span style={{ fontSize: 24 }}>{c.icon}</span>
-                  <div>
-                    <div style={{ fontWeight: 800, fontSize: 14 }}>{c.name}</div>
-                    <div className="cl-muted" style={{ fontSize: 12 }}>From {fmt.money(c.price_cents)} Price per {c.unit === 'per_kg' ? 'kg' : 'item'}</div>
-                  </div>
-                </div>
-                {!added
-                  ? <Button sm variant="ghost" onClick={() => setItem(c.id, c.unit === 'per_kg' ? { weight: 1 } : { qty: 1 })} style={{ whiteSpace: 'nowrap', background: '#fff', border: '1.5px solid var(--navy)', color: 'var(--navy)' }}>+ Add</Button>
-                  : <Button sm variant="navy" onClick={() => setItem(c.id, c.unit === 'per_kg' ? { weight: 0 } : { qty: 0 })} style={{ whiteSpace: 'nowrap' }}>✓ Added</Button>}
-              </div>
-
-              <div className="cl-row" style={{ gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
-                {(CATEGORY_CHIPS[c.category] || []).map((t) => <Chip key={t} variant="gray">{t}</Chip>)}
-              </div>
-              <div className="cl-muted" style={{ fontSize: 12, marginTop: 8 }}>{CATEGORY_DESC[c.category]}</div>
-
-              {added && <>
-                <div className="cl-between" style={{ marginTop: 12 }}>
-                  {c.unit === 'per_kg'
-                    ? <Stepper value={v.weight || 0} step={0.5} unit="kg" onChange={(weight) => setItem(c.id, { weight })} />
-                    : <Stepper value={v.qty || 0} step={1} onChange={(qty) => setItem(c.id, { qty })} />}
-                  <button onClick={() => setNoteOpen((s) => ({ ...s, [c.id]: !s[c.id] }))} style={{ fontSize: 12, fontWeight: 700, color: 'var(--navy)' }}>Any special requests?</button>
-                </div>
-                {noteOpen[c.id] && (
-                  <input className="cl-field" style={{ marginTop: 10 }} placeholder={`Notes for ${c.name}…`}
-                    value={v.note || ''} onChange={(e) => setItem(c.id, { note: e.target.value })} />
-                )}
-              </>}
-            </Card>
-          );
-        })}
+        <ServicePicker catalog={catalog} cart={cart} setCart={setCart} />
         <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
           <Button variant="ghost" onClick={() => setStep(1)}>Back</Button>
           <Button variant="lime" disabled={!items.length} onClick={() => setStep(3)}>Next</Button>
@@ -963,7 +1020,8 @@ function OrderFlow({ open, seed, onClose, onPlaced, summary }) {
 
       {step === 3 && <>
         {!quote ? <Loading /> : <>
-          <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 12 }}>Pay now (incl. tax)</div>
+          <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 4 }}>Review &amp; confirm</div>
+          <div className="cl-muted" style={{ fontSize: 12, marginBottom: 12 }}>💳 We hold this on your card now and only charge it when your order's delivered.</div>
           <Card style={{ marginBottom: 14 }}>
             <Line l="Subtotal" v={fmt.money(quote.subtotal_cents)} />
             <Line l="Service fee" v={quote.platform_fee_cents ? fmt.money(quote.platform_fee_cents) : 'WAIVED'} />
@@ -974,11 +1032,11 @@ function OrderFlow({ open, seed, onClose, onPlaced, summary }) {
             <button onClick={() => setChargesInfoOpen((x) => !x)} style={{ fontSize: 12, fontWeight: 700, color: 'var(--navy)', marginTop: 8 }}>How charges work?</button>
             {chargesInfoOpen && (
               <div className="cl-muted" style={{ fontSize: 12, marginTop: 8, lineHeight: 1.5 }}>
-                Priced per kg or item at checkout. The service fee covers collection & delivery — waived automatically on Plus/Pro. Wallet credit is applied before your card is charged.
+                We place a hold on your card at checkout and only capture it once your order is delivered. Priced per kg or item; the service fee covers collection & delivery — waived on Plus/Pro. Wallet credit is applied before the hold.
               </div>
             )}
             <div className="cl-divider" />
-            <Line l={<b>Total today</b>} v={<b>{fmt.money(quote.total_cents + tipCents)}</b>} />
+            <Line l={<b>Held now · charged on delivery</b>} v={<b>{fmt.money(quote.total_cents + tipCents)}</b>} />
           </Card>
 
           <Card style={{ marginBottom: 14 }}>
@@ -1070,7 +1128,7 @@ function OrderFlow({ open, seed, onClose, onPlaced, summary }) {
 
           <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
             <Button variant="ghost" onClick={() => setStep(skipItemStep ? 1 : 2)}>Back</Button>
-            <Button variant="lime" disabled={placing} onClick={placeWithUpsell}>{placing ? 'Placing…' : `Pay now ${fmt.money(quote.total_cents + tipCents)}`}</Button>
+            <Button variant="lime" disabled={placing} onClick={placeWithUpsell}>{placing ? 'Placing…' : `Confirm · hold ${fmt.money(quote.total_cents + tipCents)}`}</Button>
           </div>
 
           <PaymentSheet open={!!payPlan} onClose={() => setPayPlan(null)} amountCents={payPlan?.price_cents || 0}
@@ -1235,7 +1293,7 @@ function Wallet({ onReload }) {
       <Card style={{ background: 'var(--navy)', color: '#fff', marginBottom: 16, textAlign: 'center' }}>
         <div className="cl-eyebrow" style={{ color: 'rgba(255,255,255,.4)' }}>Wallet balance</div>
         <div style={{ fontSize: 40, fontWeight: 900, margin: '8px 0' }}>{fmt.money(data.balance_cents)}</div>
-        <div style={{ fontSize: 12, color: 'var(--lime)', marginBottom: 14 }}>Applied automatically at checkout</div>
+        <div style={{ fontSize: 12, color: 'rgba(255,255,255,.8)', marginBottom: 14 }}>Applied automatically at checkout</div>
         <Button variant="lime" onClick={() => setTopupOpen(true)}>+ Top up credit</Button>
       </Card>
 
@@ -1730,4 +1788,10 @@ function Line({ l, v, green }) {
   return <div className="cl-between" style={{ padding: '4px 0', fontSize: 14 }}><span className="cl-muted">{l}</span><span style={{ color: green ? 'var(--ok)' : 'inherit', fontWeight: green ? 700 : 500 }}>{v}</span></div>;
 }
 function Loading() { return <div style={{ padding: 18 }}>{[1, 2, 3].map((i) => <div key={i} className="cl-skel" style={{ height: 70, marginBottom: 12 }} />)}</div>; }
+// payment status → chip. 'authorized' = card held at checkout, charged on delivery.
+function PayChip({ status }) {
+  const map = { paid: ['paid', 'navy'], authorized: ['on hold', 'gray'], voided: ['released', 'gray'], invoiced: ['invoiced', 'gray'] };
+  const [label, variant] = map[status] || ['unpaid', 'gray'];
+  return <Chip variant={variant}>{label}</Chip>;
+}
 

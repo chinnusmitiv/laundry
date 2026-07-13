@@ -7,7 +7,7 @@ import Order from './pages/Order.jsx';
 import Account from './pages/Account.jsx';
 import Prices from './pages/Prices.jsx';
 import Login from './pages/Login.jsx';
-import { customerId, getAuth, saveAuth, logout } from './auth.js';
+import { customerId, getAuth, saveAuth, clearAuth, logout } from './auth.js';
 
 // gate authenticated pages — bounce to /login when there's no session
 function RequireAuth({ children }) {
@@ -27,6 +27,18 @@ export default function App() {
         if (u?.id) { saveAuth(u); url.searchParams.delete('login'); window.location.replace(url.pathname + url.search); }
       });
     }
+  }, []);
+
+  // auto-recover a stale session: if the stored account no longer exists on the
+  // server (e.g. the demo DB was re-seeded), clear it and bounce to /login so
+  // the user doesn't hit silent foreign-key failures on add-address / checkout.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('login')) return;
+    const a = getAuth();
+    if (!a?.id) return;
+    api.get('/api/users/' + a.id).then((u) => {
+      if (!u?.id) { clearAuth(); if (window.location.pathname !== '/login') window.location.assign('/login'); }
+    }).catch(() => {});
   }, []);
 
   return (
@@ -135,33 +147,47 @@ function Footer() {
     else nav('/#' + id);
   };
   return (
-    <footer className="foot">
+    <footer className="foot" id="site-footer">
       <div className="web-wrap">
+        <div style={{ marginBottom: 40 }}><Logo size={22} theme="light" /></div>
         <div className="foot-grid">
           <div>
-            <Logo size={20} theme="dark" tagline />
-            <p style={{ fontSize: 14, marginTop: 16, maxWidth: 320, lineHeight: 1.6 }}>
-              Doorstep laundry & dry cleaning, collected and returned within 24 hours. Zero effort.
-            </p>
+            <h4>Explore</h4>
+            <a onClick={() => jump('how')}>How it works</a>
+            <a onClick={() => nav('/prices')}>Prices & Services</a>
+            <a onClick={() => jump('areas')}>Areas covered</a>
+            <a onClick={() => nav('/order')}>Schedule a pickup</a>
           </div>
           <div>
-            <div style={{ color: '#fff', fontWeight: 800, marginBottom: 8, fontSize: 14 }}>Company</div>
-            <a>About</a><a>Careers</a><a>Press</a>
+            <h4>Our services</h4>
+            <a onClick={() => jump('services')}>Wash & Fold</a>
+            <a onClick={() => jump('services')}>Dry Cleaning</a>
+            <a onClick={() => jump('services')}>Ironing only</a>
+            <a onClick={() => jump('services')}>Duvets & Bulky items</a>
           </div>
           <div>
-            <div style={{ color: '#fff', fontWeight: 800, marginBottom: 8, fontSize: 14 }}>Service</div>
-            <a onClick={() => jump('how')} style={{ cursor: 'pointer' }}>How it works</a>
-            <a onClick={() => jump('pricing')} style={{ cursor: 'pointer' }}>Pricing</a>
-            <a onClick={() => jump('areas')} style={{ cursor: 'pointer' }}>Areas covered</a>
+            <h4>Our company</h4>
+            <a>About ChaseLaundry</a>
+            <a>In the news</a>
+            <a>Blog</a>
+            <a>Careers</a>
           </div>
           <div>
-            <div style={{ color: '#fff', fontWeight: 800, marginBottom: 8, fontSize: 14 }}>Support</div>
-            <a>Help centre</a><a>Contact</a><a>Terms & privacy</a>
+            <h4>Support</h4>
+            <a>Help centre</a>
+            <a>Contact us</a>
+            <a>Terms of service</a>
+            <a>Privacy policy</a>
           </div>
         </div>
-        <div style={{ borderTop: '1px solid rgba(255,255,255,.1)', marginTop: 36, paddingTop: 22, display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+        <div className="foot-bottom">
           <span>© 2025 ChaseLaundry · More Life. Less Laundry.</span>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Mark size={18} /> chaselaundry.com</span>
+          <div className="foot-social">
+            <span title="Instagram">📷</span>
+            <span title="Facebook">👍</span>
+            <span title="X">✖️</span>
+            <span title="TikTok">🎵</span>
+          </div>
         </div>
       </div>
     </footer>

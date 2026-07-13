@@ -1,3 +1,28 @@
+/* ───────────────────────────────────────────────────────────────
+   Laundryheap-style skin — WEB app only (imported after theme.css).
+   Remaps the shared brand tokens to Laundryheap's white + blue palette.
+   The accent slot (--lime) becomes blue, so on-accent text flips to white.
+   ─────────────────────────────────────────────────────────────── */
+:root {
+  --navy:  #0E2A63;
+  --navy2: #0A2050;
+  --navy3: #16357E;
+  --lime:      #2563EB;   /* primary blue CTA fill */
+  --lime-d:    #1D4ED8;   /* darker blue — borders, checks, eyebrows */
+  --lime-pale: #EAF1FE;   /* soft blue tint */
+  --light: #F4F7FE;
+  --shadow:    0 18px 50px rgba(14, 42, 99, 0.14);
+  --shadow-sm: 0 4px 16px rgba(14, 42, 99, 0.08);
+}
+/* on-accent text must be white now that the accent is blue */
+.cl-btn-lime { color: #fff !important; }
+.cl-chip-navy { color: #fff !important; }
+.cl-btn-ghost { background: rgba(37,99,235,.08); color: var(--navy); }
+.nav-cta { color: #fff; }
+.step-n { color: #fff; }                       /* deep-blue circle, white number */
+.hero h1 .g { color: #8CB0FF; }                /* highlighted word reads on the deep-blue hero */
+.lh-stars { color: #FBBF24; letter-spacing: 1px; }
+
 /* ChaseLaundry website — desktop-first responsive */
 body { background: #fff; }
 .web-wrap { max-width: 1180px; margin: 0 auto; padding: 0 24px; }
@@ -45,10 +70,15 @@ body { background: #fff; }
 .price li { display: flex; gap: 10px; font-size: 14px; color: var(--gray); }
 .price li::before { content: '✓'; color: var(--lime-d); font-weight: 900; }
 
-.foot { background: var(--navy2); color: rgba(255,255,255,.55); padding: 56px 0 36px; }
-.foot-grid { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 30px; }
-.foot a { display: block; color: rgba(255,255,255,.5); font-size: 14px; padding: 5px 0; }
-.foot a:hover { color: var(--lime); }
+.foot { background: #fff; color: var(--gray); padding: 64px 0 32px; border-top: 1px solid var(--gray3); }
+.foot-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 30px; }
+.foot h4 { color: var(--navy); font-weight: 800; font-size: 15px; margin-bottom: 14px; }
+.foot a { display: block; color: var(--gray); font-size: 14px; padding: 6px 0; cursor: pointer; }
+.foot a:hover { color: var(--navy); }
+.foot-bottom { border-top: 1px solid var(--gray3); margin-top: 44px; padding-top: 24px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px; font-size: 13px; color: var(--gray2); }
+.foot-social { display: flex; gap: 10px; }
+.foot-social span { width: 34px; height: 34px; border-radius: 34px; background: var(--light); display: flex; align-items: center; justify-content: center; font-size: 15px; cursor: pointer; }
+.foot-social span:hover { background: var(--lime-pale); }
 
 /* app pages (order/account) */
 .app-page { min-height: calc(100vh - 72px); background: var(--light); padding: 40px 0 80px; }
