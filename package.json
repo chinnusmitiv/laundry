@@ -18,6 +18,8 @@
     "dev:driver": "npm -w @chaselaundry/driver run dev",
     "dev:ops": "npm -w @chaselaundry/ops run dev",
     "dev:web": "npm -w @chaselaundry/web run dev",
+    "dev:customer-native": "npm -w @chaselaundry/customer-native run start",
+    "dev:driver-native": "npm -w @chaselaundry/driver-native run start",
     "seed": "npm -w server run seed"
   },
   "devDependencies": {
