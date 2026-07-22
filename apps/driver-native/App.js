@@ -1,48 +1,52 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, ActivityIndicator } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import * as SplashScreen from 'expo-splash-screen';
+import { ThemeProvider, navyLimeTheme, useSatoshiFonts } from '@chaselaundry/shared-native';
 import LoginScreen from './src/screens/LoginScreen';
 import JobsScreen from './src/screens/JobsScreen';
-import JobDetailScreen from './src/screens/JobDetailScreen';
 import { loadDriver, clearDriver } from './src/lib/session';
-import { colors } from './src/theme';
+
+SplashScreen.preventAutoHideAsync().catch(() => {});
 
 const Stack = createNativeStackNavigator();
+const navTheme = { ...DefaultTheme, colors: { ...DefaultTheme.colors, background: navyLimeTheme.bg } };
 
 export default function App() {
   const [driver, setDriver] = useState(null);
-  const [ready, setReady] = useState(false);
+  const [sessionReady, setSessionReady] = useState(false);
+  const [fontsLoaded] = useSatoshiFonts();
 
-  useEffect(() => { loadDriver().then((d) => { setDriver(d); setReady(true); }); }, []);
+  useEffect(() => { loadDriver().then((d) => { setDriver(d); setSessionReady(true); }); }, []);
+
+  useEffect(() => {
+    if (sessionReady && fontsLoaded) SplashScreen.hideAsync().catch(() => {});
+  }, [sessionReady, fontsLoaded]);
 
   const onLogout = useCallback(async () => { await clearDriver(); setDriver(null); }, []);
 
-  if (!ready) {
-    return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.navy }}><ActivityIndicator color="#fff" /></View>;
-  }
+  if (!sessionReady || !fontsLoaded) return null;
 
   return (
-    <SafeAreaProvider>
-      <StatusBar style="light" />
-      <NavigationContainer>
-        <Stack.Navigator screenOptions={{ headerShown: false }}>
-          {!driver ? (
-            <Stack.Screen name="Login">
-              {() => <LoginScreen onLoggedIn={setDriver} />}
-            </Stack.Screen>
-          ) : (
-            <>
-              <Stack.Screen name="Jobs">
-                {(props) => <JobsScreen {...props} driver={driver} onLogout={onLogout} />}
+    <ThemeProvider theme={navyLimeTheme}>
+      <SafeAreaProvider>
+        <StatusBar style="light" />
+        <NavigationContainer theme={navTheme}>
+          <Stack.Navigator screenOptions={{ headerShown: false }}>
+            {!driver ? (
+              <Stack.Screen name="Login">
+                {() => <LoginScreen onLoggedIn={setDriver} />}
               </Stack.Screen>
-              <Stack.Screen name="JobDetail" component={JobDetailScreen} options={{ headerShown: true, title: 'Job details' }} />
-            </>
-          )}
-        </Stack.Navigator>
-      </NavigationContainer>
-    </SafeAreaProvider>
+            ) : (
+              <Stack.Screen name="Jobs">
+                {() => <JobsScreen driver={driver} onLogout={onLogout} />}
+              </Stack.Screen>
+            )}
+          </Stack.Navigator>
+        </NavigationContainer>
+      </SafeAreaProvider>
+    </ThemeProvider>
   );
 }

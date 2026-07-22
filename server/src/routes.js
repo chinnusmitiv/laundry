@@ -2,6 +2,7 @@ import { nanoid } from 'nanoid';
 import { randomInt } from 'node:crypto';
 import { db, STATUS_FLOW, STATUS_LABEL, GARMENT_FLOW } from './db.js';
 import { payments, bank, email, google, notify, stepToward, distanceKm } from './services.js';
+import { createPaymentIntent, retrievePaymentIntent } from './stripe.js';
 import { searchPlaces, searchOneMap } from './places.js';
 import { hashPassword } from './crypto.js';
 
@@ -9,6 +10,15 @@ const now = () => new Date().toISOString();
 const id = (p) => `${p}_${nanoid(8)}`;
 const SERVICE_FEE_CENTS = 399; // flat per-order service fee — waived for Chase Plus/Pro members
 const cardBrand = (digits) => (/^4/.test(digits) ? 'Visa' : /^5[1-5]/.test(digits) ? 'Mastercard' : /^3[47]/.test(digits) ? 'Amex' : 'Card');
+
+// Verifies a real Stripe PaymentIntent (web's real-payment flow) actually succeeded for the
+// expected amount, before any business endpoint below persists its effect. Throws on failure.
+async function verifyRealPayment(paymentIntentId, expectedAmountCents) {
+  const pi = await retrievePaymentIntent(paymentIntentId);
+  if (pi.status !== 'succeeded') throw new Error('Payment has not succeeded.');
+  if (pi.amount !== Math.round(expectedAmountCents)) throw new Error('Payment amount does not match.');
+  return pi;
+}
 
 // ---- app settings (key/value JSON) ----
 const DEFAULT_ROUTING = { auto_route: true, strategy: 'nearest', default_facility_id: null, rules: [] };
@@ -494,22 +504,46 @@ export function registerRoutes(app, io) {
 
   // Charge the order now. If the card was held at checkout we capture that hold
   // (no second charge); otherwise we charge fresh. Either way ends up 'paid'.
-  app.post('/api/orders/:id/pay', (req, res) => {
+  // `payment_intent_id` (optional) is a real Stripe PaymentIntent id from the web apps'
+  // PaymentSheet — when present it's verified against Stripe instead of trusting the client.
+  app.post('/api/orders/:id/pay', async (req, res) => {
     const o = db.prepare('SELECT * FROM orders WHERE id = ?').get(req.params.id);
     if (!o) return res.status(404).json({ error: 'not found' });
     if (o.payment_status === 'paid') return res.json({ ok: true, order: fullOrder(o.id) });
     const amt = o.payment_status === 'authorized' ? (o.hold_amount_cents ?? o.total_cents) : o.total_cents;
-    const pay = o.payment_status === 'authorized'
-      ? payments.capture({ authId: o.payment_auth_id, orderId: o.code, amountCents: amt })
-      : payments.charge({ orderId: o.id, amountCents: amt, customer: getUser(o.customer_id) });
+    let pay;
+    if (req.body.payment_intent_id) {
+      try { pay = await verifyRealPayment(req.body.payment_intent_id, amt); }
+      catch (e) { return res.status(402).json({ error: e.message }); }
+    } else {
+      pay = o.payment_status === 'authorized'
+        ? payments.capture({ authId: o.payment_auth_id, orderId: o.code, amountCents: amt })
+        : payments.charge({ orderId: o.id, amountCents: amt, customer: getUser(o.customer_id) });
+    }
     db.prepare('UPDATE orders SET payment_status = ?, captured_at = ?, updated_at = ? WHERE id = ?').run('paid', now(), now(), o.id);
     notify({ io, userId: o.customer_id, type: 'payment', title: 'Payment received', body: `S$${(amt / 100).toFixed(2)} paid for ${o.code}.`, orderId: o.id });
     res.json({ ok: true, payment: pay, order: broadcastOrder(io, o.id) });
   });
 
+  // ---- Real Stripe test-mode payment (web apps) ----
+  // Creates an actual PaymentIntent; the client confirms it with Stripe Elements, then
+  // passes the id back to whichever business endpoint (pay/topup/packs/subscription) as
+  // `payment_intent_id` for server-side verification.
+  app.post('/api/payments/create-intent', async (req, res) => {
+    try {
+      const pi = await createPaymentIntent({
+        amountCents: req.body.amount_cents || 0,
+        description: req.body.description || 'Payment',
+        receiptEmail: req.body.email,
+      });
+      res.json({ client_secret: pi.client_secret, payment_intent_id: pi.id });
+    } catch (e) { res.status(400).json({ error: e.message }); }
+  });
+
   // ---- Stripe-shaped payment with simulated 3D Secure (SCA) ----
   // Generic: the client runs this to "charge a card"; the actual business
   // action (mark order paid / activate subscription) is a separate call.
+  // Kept as-is for customer-native, which still uses this fully-simulated flow.
   app.post('/api/payments/intent', (req, res) => {
     res.json(payments.createIntent({ amountCents: req.body.amount_cents || 0, description: req.body.description || 'Payment' }));
   });
@@ -548,12 +582,17 @@ export function registerRoutes(app, io) {
   });
 
   // top up wallet credit (after a Stripe payment) — with promotional bonus tiers
-  app.post('/api/customers/:id/topup', (req, res) => {
+  app.post('/api/customers/:id/topup', async (req, res) => {
     const uid = req.params.id;
     const amount = Math.max(0, Math.round(Number(req.body.amount_cents) || 0));
     if (amount < 500) return res.status(400).json({ error: 'Minimum top-up is S$5.' });
+    if (req.body.payment_intent_id) {
+      try { await verifyRealPayment(req.body.payment_intent_id, amount); }
+      catch (e) { return res.status(402).json({ error: e.message }); }
+    } else {
+      payments.charge({ orderId: 'topup', amountCents: amount, customer: getUser(uid) });
+    }
     const { bonus, pct } = topupBonus(amount);
-    payments.charge({ orderId: 'topup', amountCents: amount, customer: getUser(uid) });
     db.prepare('INSERT INTO credits (id,user_id,amount_cents,type,reason,order_id,created_at) VALUES (?,?,?,?,?,?,?)')
       .run(id('cr'), uid, amount, 'topup', 'Wallet top-up', null, now());
     if (bonus > 0) {
@@ -581,7 +620,7 @@ export function registerRoutes(app, io) {
   });
 
   // buy a prepaid pack (payment already authorized client-side, mirrors /topup)
-  app.post('/api/customers/:id/packs', (req, res) => {
+  app.post('/api/customers/:id/packs', async (req, res) => {
     const uid = req.params.id;
     const { catalog_id, qty } = req.body;
     const cat = db.prepare('SELECT * FROM catalog WHERE id = ?').get(catalog_id);
@@ -589,7 +628,12 @@ export function registerRoutes(app, io) {
     const tier = (PACK_TIERS[cat.unit] || []).find((t) => t.qty === Number(qty));
     if (!tier) return res.status(400).json({ error: 'Invalid pack size.' });
     const price = Math.round(cat.price_cents * tier.qty * (1 - tier.discount_pct / 100));
-    payments.charge({ orderId: 'pack', amountCents: price, customer: getUser(uid) });
+    if (req.body.payment_intent_id) {
+      try { await verifyRealPayment(req.body.payment_intent_id, price); }
+      catch (e) { return res.status(402).json({ error: e.message }); }
+    } else {
+      payments.charge({ orderId: 'pack', amountCents: price, customer: getUser(uid) });
+    }
     const pid = id('pack');
     const purchased = now();
     const expires = new Date(Date.now() + PACK_EXPIRY_DAYS * 86400000).toISOString();
@@ -619,13 +663,17 @@ export function registerRoutes(app, io) {
   });
 
   // subscriptions
-  app.post('/api/customers/:id/subscription', (req, res) => {
+  app.post('/api/customers/:id/subscription', async (req, res) => {
     const uid = req.params.id;
     const plan = db.prepare('SELECT * FROM plans WHERE id = ?').get(req.body.plan_id);
     if (!plan) return res.status(400).json({ error: 'bad plan' });
+    if (plan.price_cents > 0 && req.body.payment_intent_id) {
+      try { await verifyRealPayment(req.body.payment_intent_id, plan.price_cents); }
+      catch (e) { return res.status(402).json({ error: e.message }); }
+    }
     db.prepare(`UPDATE subscriptions SET status='cancelled' WHERE user_id=? AND status='active'`).run(uid);
     if (plan.id !== 'plan_lite') {
-      payments.createSubscription({ user: getUser(uid), plan });
+      if (!req.body.payment_intent_id) payments.createSubscription({ user: getUser(uid), plan });
       db.prepare('INSERT INTO subscriptions (id,user_id,plan_id,status,started_at,renews_at) VALUES (?,?,?,?,?,?)')
         .run(id('sub'), uid, plan.id, 'active', now(), new Date(Date.now() + 30 * 864e5).toISOString());
     }

@@ -24,21 +24,51 @@ export const api = {
   post: (p, b) => req('POST', p, b),
 };
 
+// auth
 export const requestOtp = (identifier) => api.post('/api/auth/request-otp', { identifier });
 export const verifyOtp = (identifier, code, name) => api.post('/api/auth/verify-otp', { identifier, code, name });
+
+// catalog / plans
 export const getCatalog = () => api.get('/api/catalog');
+export const getPlans = () => api.get('/api/plans');
+export const placesSearch = (q) => api.get(`/api/places/search?q=${encodeURIComponent(q)}`);
+
+// customer summary / profile / addresses
 export const getSummary = (customerId) => api.get(`/api/customers/${customerId}/summary`);
+export const updateProfile = (customerId, patch) => api.post(`/api/customers/${customerId}/profile`, patch);
 export const addAddress = (customerId, address) => api.post(`/api/customers/${customerId}/addresses`, address);
+export const updateAddress = (customerId, addrId, patch) => api.post(`/api/customers/${customerId}/addresses/${addrId}`, patch);
+export const setDefaultAddress = (customerId, addrId) => api.post(`/api/customers/${customerId}/addresses/${addrId}/default`);
+
+// orders
+export const getOrders = (customerId) => api.get(`/api/customers/${customerId}/orders`);
+export const getOrder = (orderId) => api.get(`/api/orders/${orderId}`);
 export const quoteOrder = (payload) => api.post('/api/orders/quote', payload);
 export const placeOrder = (payload) => api.post('/api/orders', payload);
-export const getOrders = (customerId) => api.get(`/api/customers/${customerId}/orders`);
+export const payOrder = (orderId) => api.post(`/api/orders/${orderId}/pay`);
+export const submitReview = (orderId, payload) => api.post(`/api/orders/${orderId}/review`, payload);
+export const confirmPayment = (payload) => api.post('/api/payments/confirm', payload);
 
-export const CATEGORY_LABEL = {
-  wash_fold: 'Wash & Fold',
-  dry_clean: 'Dry Cleaning',
-  ironing: 'Ironing Only',
-  bedding: 'Duvets & Bulky Items',
-  specialty: 'Specialty Care',
-};
+// wallet / packs / referrals / subscriptions
+export const getCredits = (customerId) => api.get(`/api/customers/${customerId}/credits`);
+export const topup = (customerId, amountCents) => api.post(`/api/customers/${customerId}/topup`, { amount_cents: amountCents });
+export const getPacks = (customerId) => api.get(`/api/customers/${customerId}/packs`);
+export const buyPack = (customerId, catalogId, qty) => api.post(`/api/customers/${customerId}/packs`, { catalog_id: catalogId, qty });
+export const getReferrals = (customerId) => api.get(`/api/customers/${customerId}/referrals`);
+export const inviteReferral = (customerId, email) => api.post(`/api/customers/${customerId}/referrals`, { email });
+export const activateSubscription = (customerId, planId) => api.post(`/api/customers/${customerId}/subscription`, { plan_id: planId });
+export const cancelSubscription = (customerId) => api.post(`/api/customers/${customerId}/subscription/cancel`);
 
-export const PICKUP_SLOTS = ['Today · 18:00–20:00', 'Tomorrow · 08:00–10:00', 'Tomorrow · 18:00–20:00', 'Sat · 10:00–12:00'];
+// notifications
+export const getNotifications = (customerId) => api.get(`/api/customers/${customerId}/notifications`);
+export const markAllNotificationsRead = (customerId) => api.post(`/api/customers/${customerId}/notifications/read-all`);
+
+// support
+export const getThreads = (customerId) => api.get(`/api/customers/${customerId}/threads`);
+export const createThread = (customerId, payload) => api.post(`/api/customers/${customerId}/threads`, payload);
+export const getThread = (threadId) => api.get(`/api/threads/${threadId}`);
+export const sendThreadMessage = (threadId, payload) => api.post(`/api/threads/${threadId}/messages`, payload);
+
+// demo / live tracking
+export const spawnTracking = (customerId) => api.post(`/api/demo/customers/${customerId}/spawn-tracking`);
+export const simulateDrive = (orderId) => api.post(`/api/demo/orders/${orderId}/simulate-drive`, {});

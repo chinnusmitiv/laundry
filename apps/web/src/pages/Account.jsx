@@ -193,7 +193,7 @@ function OrderDetail({ orderId }) {
 
       <PaymentSheet open={payOpen} onClose={() => setPayOpen(false)} amountCents={o.total_cents}
         title="Complete payment" description={o.code}
-        onAuthorized={async () => { await api.post(`/api/orders/${o.id}/pay`); reload(); }} />
+        onAuthorized={async (paymentIntentId) => { await api.post(`/api/orders/${o.id}/pay`, { payment_intent_id: paymentIntentId }); reload(); }} />
     </div>
   );
 }
@@ -400,7 +400,7 @@ function Wallet({ onReload }) {
         <TopUpSheet open={topupOpen} onClose={() => setTopupOpen(false)} onContinue={(amt) => { setTopupOpen(false); setPayAmount(amt); }} />
         <PaymentSheet open={payAmount > 0} onClose={() => setPayAmount(0)} amountCents={payAmount} cta="Top up"
           title="Top up wallet" description={`+ ${fmt.money(payAmount + topupBonus(payAmount).bonus)} credit`}
-          onAuthorized={async () => { await api.post(`/api/customers/${CUSTOMER_ID}/topup`, { amount_cents: payAmount }); reload(); onReload?.(); }} />
+          onAuthorized={async (paymentIntentId) => { await api.post(`/api/customers/${CUSTOMER_ID}/topup`, { amount_cents: payAmount, payment_intent_id: paymentIntentId }); reload(); onReload?.(); }} />
 
         <div className="panel">
           <b>Refer a friend 🎁</b>
@@ -451,8 +451,8 @@ function Packs() {
   useEffect(() => { load(); }, [load]);
   if (!data) return <div className="panel">Loading…</div>;
 
-  const buy = async () => {
-    await api.post(`/api/customers/${CUSTOMER_ID}/packs`, { catalog_id: buying.catalog_id, qty: buying.tier.qty });
+  const buy = async (paymentIntentId) => {
+    await api.post(`/api/customers/${CUSTOMER_ID}/packs`, { catalog_id: buying.catalog_id, qty: buying.tier.qty, payment_intent_id: paymentIntentId });
     setBuying(null); setPayAmount(0); await load();
   };
 

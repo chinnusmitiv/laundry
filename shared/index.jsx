@@ -2,6 +2,8 @@ import React, { useEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { loadStripe } from '@stripe/stripe-js';
+import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
 import { getSocket, fmt, api } from './api.js';
 
 export * from './api.js';
@@ -466,13 +468,12 @@ export function distKm(a, b) {
 }
 export const etaMins = (km) => (km == null ? null : Math.max(1, Math.round(km * 3)));
 
-// ── Stripe-style payment sheet with simulated 3D Secure (shared by customer + web) ──
-const TEST_CARDS = [
-  { label: '3D Secure', num: '4000 0025 0000 3155' },
-  { label: 'Instant', num: '4242 4242 4242 4242' },
-  { label: 'Declined', num: '4000 0000 0000 9995' },
-];
-const groupCard = (v) => v.replace(/\D/g, '').slice(0, 16).replace(/(.{4})/g, '$1 ').trim();
+// ── Real Stripe test-mode payment sheet (shared by customer + web) ──
+let stripePromise;
+function getStripe() {
+  if (!stripePromise) stripePromise = loadStripe(import.meta.env?.VITE_STRIPE_PUBLISHABLE_KEY || '');
+  return stripePromise;
+}
 function PayLine({ l, v, green }) {
   return <div className="cl-between" style={{ padding: '4px 0', fontSize: 14 }}><span className="cl-muted">{l}</span><span style={{ color: green ? 'var(--ok)' : 'inherit', fontWeight: green ? 700 : 500 }}>{v}</span></div>;
 }
@@ -481,106 +482,79 @@ function PayErr({ children }) {
 }
 
 export function PaymentSheet({ open, onClose, amountCents, title, description, cta = 'Pay', recurring = false, onAuthorized }) {
-  const [phase, setPhase] = useState('card'); // card | 3ds | success
-  const [card, setCard] = useState('4000 0025 0000 3155');
-  const [exp, setExp] = useState('12 / 34');
-  const [cvc, setCvc] = useState('123');
-  const [auth, setAuth] = useState(null);
-  const [code, setCode] = useState('');
+  const [clientSecret, setClientSecret] = useState(null);
+  const [phase, setPhase] = useState('form'); // form | success
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
   useEffect(() => {
-    if (open) { setPhase('card'); setCard('4000 0025 0000 3155'); setExp('12 / 34'); setCvc('123'); setAuth(null); setCode(''); setErr(''); setBusy(false); }
+    if (!open) return;
+    setClientSecret(null); setPhase('form'); setBusy(false); setErr('');
+    api.post('/api/payments/create-intent', { amount_cents: amountCents, description }).then((r) => setClientSecret(r.client_secret));
+    // eslint-disable-next-line
   }, [open]);
 
-  const finish = async () => {
+  const finish = async (paymentIntentId) => {
     setBusy(true); setErr('');
-    try { await onAuthorized?.(); setPhase('success'); setTimeout(() => onClose?.(), 1300); }
+    try { await onAuthorized?.(paymentIntentId); setPhase('success'); setTimeout(() => onClose?.(), 1300); }
     catch (e) { setErr(e.message || 'Payment captured but activation failed.'); setBusy(false); }
   };
 
-  const confirm = async (withCode) => {
-    setBusy(true); setErr('');
-    try {
-      const res = await api.post('/api/payments/confirm', { card, code: withCode ? code : undefined, amount_cents: amountCents, description });
-      if (res.status === 'requires_action') { setAuth(res.auth); setCode(res.auth?.demo_code || ''); setPhase('3ds'); setBusy(false); return; }
-      if (res.status === 'succeeded') return finish();
-      setErr('Payment could not be completed.'); setBusy(false);
-    } catch (e) { setErr(e.message || 'Payment failed.'); setBusy(false); }
-  };
-
   return (
-    <Sheet open={open} onClose={busy ? undefined : onClose} title={phase === '3ds' ? null : title}>
+    <Sheet open={open} onClose={busy ? undefined : onClose} title={title}>
       {phase === 'success' ? (
         <div style={{ textAlign: 'center', padding: '24px 0 12px' }}>
           <div style={{ width: 64, height: 64, borderRadius: 64, background: 'var(--lime)', color: 'var(--navy)', fontSize: 34, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px' }}>✓</div>
-          <div style={{ fontWeight: 900, fontSize: 19 }}>Payment authenticated</div>
+          <div style={{ fontWeight: 900, fontSize: 19 }}>Payment successful</div>
           <div className="cl-muted" style={{ fontSize: 13, marginTop: 4 }}>{fmt.money(amountCents)}{recurring ? ' / mo' : ''} · {description}</div>
         </div>
-      ) : phase === '3ds' ? (
-        <>
-          <div style={{ background: 'var(--navy)', color: '#fff', borderRadius: 14, padding: '16px 16px 18px', marginBottom: 16 }}>
-            <div className="cl-between" style={{ marginBottom: 12 }}>
-              <span style={{ fontWeight: 900, fontSize: 15 }}>🔒 {auth?.bank || 'Bank'} Secure</span>
-              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--lime)' }}>{auth?.brand} •••• {auth?.masked}</span>
-            </div>
-            <div style={{ fontSize: 13, color: 'rgba(255,255,255,.7)' }}>
-              For your security, enter the one-time code to authorise this {recurring ? 'subscription' : 'payment'} of <b style={{ color: '#fff' }}>{fmt.money(amountCents)}</b>.
-            </div>
-          </div>
-          <label style={{ display: 'block', marginBottom: 12 }}>
-            <span className="cl-label">Authentication code</span>
-            <input className="cl-field" inputMode="numeric" maxLength={6} placeholder="••••••"
-              value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
-              onKeyDown={(e) => e.key === 'Enter' && code.length === 6 && confirm(true)}
-              style={{ textAlign: 'center', fontSize: 24, fontWeight: 800, letterSpacing: '10px' }} />
-          </label>
-          {auth?.demo_code && (
-            <div style={{ background: 'var(--lime-pale)', border: '1.5px dashed var(--lime-d)', color: 'var(--navy)', fontSize: 12, padding: '10px 12px', borderRadius: 10, marginBottom: 12 }}>
-              🔒 <b>Demo mode</b> — your bank would SMS this. Code: <b>{auth.demo_code}</b>
-            </div>
-          )}
-          {err && <PayErr>{err}</PayErr>}
-          <Button variant="lime" disabled={code.length !== 6 || busy} onClick={() => confirm(true)}>{busy ? 'Authenticating…' : 'Authenticate'}</Button>
-          <div style={{ textAlign: 'center', marginTop: 12 }}>
-            <button onClick={() => { setPhase('card'); setErr(''); }} style={{ color: 'var(--gray)', fontSize: 13, fontWeight: 600 }}>← Cancel</button>
-          </div>
-        </>
+      ) : !clientSecret ? (
+        <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--gray)' }}>Preparing payment…</div>
       ) : (
-        <>
-          <div className="cl-between" style={{ marginBottom: 16 }}>
-            <span className="cl-muted" style={{ fontSize: 13 }}>{description}</span>
-            <span style={{ fontWeight: 900, fontSize: 18 }}>{fmt.money(amountCents)}{recurring ? <span style={{ fontSize: 12, color: 'var(--gray)' }}> / mo</span> : null}</span>
-          </div>
-          <label style={{ display: 'block', marginBottom: 12 }}>
-            <span className="cl-label">Card number</span>
-            <div style={{ position: 'relative' }}>
-              <input className="cl-field" inputMode="numeric" placeholder="1234 1234 1234 1234" value={card}
-                onChange={(e) => setCard(groupCard(e.target.value))} style={{ paddingRight: 64 }} />
-              <span style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', fontSize: 18 }}>💳</span>
-            </div>
-          </label>
-          <div style={{ display: 'flex', gap: 10, marginBottom: 14 }}>
-            <label style={{ flex: 1 }}><span className="cl-label">Expiry</span>
-              <input className="cl-field" placeholder="MM / YY" value={exp} onChange={(e) => setExp(e.target.value)} /></label>
-            <label style={{ flex: 1 }}><span className="cl-label">CVC</span>
-              <input className="cl-field" inputMode="numeric" maxLength={4} placeholder="CVC" value={cvc} onChange={(e) => setCvc(e.target.value.replace(/\D/g, ''))} /></label>
-          </div>
-          <div className="cl-row" style={{ gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
-            <span className="cl-muted" style={{ fontSize: 11 }}>Test cards:</span>
-            {TEST_CARDS.map((t) => (
-              <button key={t.num} onClick={() => setCard(t.num)} style={{ fontSize: 11, fontWeight: 700, padding: '4px 9px', borderRadius: 999, border: '1px solid var(--gray3)', background: card === t.num ? 'var(--navy)' : '#fff', color: card === t.num ? '#fff' : 'var(--gray)' }}>{t.label}</button>
-            ))}
-          </div>
-          {err && <PayErr>{err}</PayErr>}
-          <Button variant="lime" disabled={busy} onClick={() => confirm(false)}>{busy ? 'Processing…' : `${cta} ${fmt.money(amountCents)}`}</Button>
-          <div className="cl-row" style={{ gap: 6, justifyContent: 'center', marginTop: 12, color: 'var(--gray2)', fontSize: 11 }}>
-            <span>🔒 Secured by</span><b style={{ color: 'var(--navy)' }}>Stripe</b><span>· test mode</span>
-          </div>
-        </>
+        <Elements key={clientSecret} stripe={getStripe()} options={{ clientSecret }}>
+          <StripeCardForm amountCents={amountCents} description={description} cta={cta} recurring={recurring} busy={busy} err={err} setErr={setErr} onSuccess={finish} />
+        </Elements>
       )}
     </Sheet>
+  );
+}
+
+function StripeCardForm({ amountCents, description, cta, recurring, busy, err, setErr, onSuccess }) {
+  const stripe = useStripe();
+  const elements = useElements();
+  const [submitting, setSubmitting] = useState(false);
+
+  const submit = async () => {
+    if (!stripe || !elements) return;
+    setSubmitting(true); setErr('');
+    const { error, paymentIntent } = await stripe.confirmPayment({
+      elements,
+      confirmParams: { return_url: window.location.href },
+      redirect: 'if_required',
+    });
+    if (error) { setErr(error.message || 'Payment failed.'); setSubmitting(false); return; }
+    if (paymentIntent?.status === 'succeeded') return onSuccess(paymentIntent.id);
+    setErr('Payment could not be completed.'); setSubmitting(false);
+  };
+
+  return (
+    <>
+      <div className="cl-between" style={{ marginBottom: 16 }}>
+        <span className="cl-muted" style={{ fontSize: 13 }}>{description}</span>
+        <span style={{ fontWeight: 900, fontSize: 18 }}>{fmt.money(amountCents)}{recurring ? <span style={{ fontSize: 12, color: 'var(--gray)' }}> / mo</span> : null}</span>
+      </div>
+      <div style={{ marginBottom: 14 }}>
+        <PaymentElement options={{ layout: 'tabs' }} />
+      </div>
+      <div className="cl-muted" style={{ fontSize: 11, marginBottom: 14, lineHeight: 1.5 }}>
+        Stripe test mode — try <b>4242 4242 4242 4242</b> (instant approval), <b>4000 0025 0000 3155</b> (triggers 3D Secure), or <b>4000 0000 0000 9995</b> (declined). Any future expiry date, any CVC.
+      </div>
+      {err && <PayErr>{err}</PayErr>}
+      <Button variant="lime" disabled={!stripe || submitting || busy} onClick={submit}>{submitting || busy ? 'Processing…' : `${cta} ${fmt.money(amountCents)}`}</Button>
+      <div className="cl-row" style={{ gap: 6, justifyContent: 'center', marginTop: 12, color: 'var(--gray2)', fontSize: 11 }}>
+        <span>🔒 Secured by</span><b style={{ color: 'var(--navy)' }}>Stripe</b><span>· test mode</span>
+      </div>
+    </>
   );
 }
 

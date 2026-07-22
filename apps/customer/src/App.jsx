@@ -804,7 +804,7 @@ function OrderDetail({ orderId, onClose }) {
 
         <PaymentSheet open={payOpen} onClose={() => setPayOpen(false)} amountCents={o.total_cents}
           title="Complete payment" description={o.code}
-          onAuthorized={async () => { await api.post(`/api/orders/${o.id}/pay`); reload(); }} />
+          onAuthorized={async (paymentIntentId) => { await api.post(`/api/orders/${o.id}/pay`, { payment_intent_id: paymentIntentId }); reload(); }} />
 
         {o.status === 'completed' && <Button variant="ghost" style={{ marginBottom: 10 }} onClick={() => setReviewOpen(true)}>★ Rate this order</Button>}
 
@@ -935,7 +935,7 @@ function OrderFlow({ open, seed, onClose, onPlaced, summary }) {
     setPlacing(false); onPlaced(o);
   };
 
-  const activatePlan = (plan_id) => api.post(`/api/customers/${summary.user.id}/subscription`, { plan_id });
+  const activatePlan = (plan_id, paymentIntentId) => api.post(`/api/customers/${summary.user.id}/subscription`, { plan_id, payment_intent_id: paymentIntentId });
 
   // if the customer picked a checkout upsell plan, subscribe first (paid plans need card auth), then place the order
   const placeWithUpsell = async () => {
@@ -1127,7 +1127,7 @@ function OrderFlow({ open, seed, onClose, onPlaced, summary }) {
 
           <PaymentSheet open={!!payPlan} onClose={() => setPayPlan(null)} amountCents={payPlan?.price_cents || 0}
             recurring cta="Subscribe & pay" title={payPlan ? `Subscribe to ${payPlan.name}` : ''} description={payPlan ? `${payPlan.name} plan` : ''}
-            onAuthorized={async () => { await activatePlan(payPlan.id); setPayPlan(null); await place(); }} />
+            onAuthorized={async (paymentIntentId) => { await activatePlan(payPlan.id, paymentIntentId); setPayPlan(null); await place(); }} />
         </>}
       </>}
     </Sheet>
@@ -1295,7 +1295,7 @@ function Wallet({ onReload }) {
         onContinue={(amt) => { setTopupOpen(false); setPayAmount(amt); }} />
       <PaymentSheet open={payAmount > 0} onClose={() => setPayAmount(0)} amountCents={payAmount} cta="Top up"
         title="Top up wallet" description={`+ ${fmt.money(payAmount + topupBonus(payAmount).bonus)} credit`}
-        onAuthorized={async () => { await api.post(`/api/customers/${CUSTOMER_ID}/topup`, { amount_cents: payAmount }); await loadWallet(); onReload?.(); }} />
+        onAuthorized={async (paymentIntentId) => { await api.post(`/api/customers/${CUSTOMER_ID}/topup`, { amount_cents: payAmount, payment_intent_id: paymentIntentId }); await loadWallet(); onReload?.(); }} />
 
       <PacksSection customerId={CUSTOMER_ID} onReload={onReload} />
 
@@ -1330,8 +1330,8 @@ function PacksSection({ customerId, onReload }) {
 
   if (!data) return <Loading />;
 
-  const buy = async () => {
-    await api.post(`/api/customers/${customerId}/packs`, { catalog_id: buying.catalog_id, qty: buying.tier.qty });
+  const buy = async (paymentIntentId) => {
+    await api.post(`/api/customers/${customerId}/packs`, { catalog_id: buying.catalog_id, qty: buying.tier.qty, payment_intent_id: paymentIntentId });
     setBuying(null); setPayAmount(0); await load(); onReload?.();
   };
 
@@ -1662,7 +1662,7 @@ function SubscriptionsSheet({ open, onClose, summary, onReload }) {
   useEffect(() => { if (open) api.get('/api/plans').then(setPlans); }, [open]);
   const current = summary.subscription?.plan_id || 'plan_lite';
 
-  const activate = (plan_id) => api.post(`/api/customers/${CUSTOMER_ID}/subscription`, { plan_id }).then(onReload);
+  const activate = (plan_id, paymentIntentId) => api.post(`/api/customers/${CUSTOMER_ID}/subscription`, { plan_id, payment_intent_id: paymentIntentId }).then(onReload);
   const choose = (plan) => { if (plan.price_cents) setPayPlan(plan); else activate(plan.id); };
   const cancel = async () => { await api.post(`/api/customers/${CUSTOMER_ID}/subscription/cancel`); onReload(); };
 
@@ -1687,7 +1687,7 @@ function SubscriptionsSheet({ open, onClose, summary, onReload }) {
       })}
       <PaymentSheet open={!!payPlan} onClose={() => setPayPlan(null)} amountCents={payPlan?.price_cents || 0}
         recurring cta="Subscribe" title={payPlan ? `Subscribe to ${payPlan.name}` : ''} description={payPlan ? `${payPlan.name} plan` : ''}
-        onAuthorized={async () => { await activate(payPlan.id); }} />
+        onAuthorized={async (paymentIntentId) => { await activate(payPlan.id, paymentIntentId); }} />
     </Sheet>
   );
 }

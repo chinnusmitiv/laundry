@@ -1,0 +1,11 @@
+{
+  "name": "@chaselaundry/shared-native",
+  "version": "0.1.0",
+  "private": true,
+  "main": "src/index.js",
+  "dependencies": {
+    "expo-font": "~57.0.1",
+    "react-native-svg": "15.15.4",
+    "react-native-webview": "13.16.1"
+  }
+}

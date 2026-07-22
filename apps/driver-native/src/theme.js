@@ -1,13 +1,3 @@
-export const colors = {
-  navy: '#1D2951',
-  navy2: '#162040',
-  lime: '#C7FF33',
-  limeD: '#A8D400',
-  limePale: '#F0FFD0',
-  gray: '#5B6478',
-  gray2: '#8A93A6',
-  gray3: '#E8EAF0',
-  bg: '#F5F6FA',
-  white: '#FFFFFF',
-  danger: '#E5484D',
-};
+// Matches driver-web, which renders the raw shared/brand/theme.css tokens unmodified
+// (no laundryheap.css-style override like the customer app has).
+export { navyLimeTheme as theme } from '@chaselaundry/shared-native';

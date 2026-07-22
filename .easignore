@@ -1,0 +1,7 @@
+node_modules/
+**/android/
+**/ios/
+**/.expo/
+**/.gradle/
+**/.cxx/
+server/data/

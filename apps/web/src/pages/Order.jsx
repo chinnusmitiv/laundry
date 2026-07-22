@@ -72,7 +72,7 @@ export default function Order() {
     setPlacing(false); setPlaced(o); setStep(4);
   };
 
-  const activatePlan = (plan_id) => api.post(`/api/customers/${CUSTOMER_ID}/subscription`, { plan_id });
+  const activatePlan = (plan_id, paymentIntentId) => api.post(`/api/customers/${CUSTOMER_ID}/subscription`, { plan_id, payment_intent_id: paymentIntentId });
   const placeWithUpsell = async () => {
     if (upsellPlan) {
       const plan = plans.find((p) => p.id === upsellPlan);
@@ -230,7 +230,7 @@ export default function Order() {
 
                 <PaymentSheet open={!!payPlan} onClose={() => setPayPlan(null)} amountCents={payPlan?.price_cents || 0}
                   recurring cta="Subscribe & pay" title={payPlan ? `Subscribe to ${payPlan.name}` : ''} description={payPlan ? `${payPlan.name} plan` : ''}
-                  onAuthorized={async () => { await activatePlan(payPlan.id); setPayPlan(null); await place(); }} />
+                  onAuthorized={async (paymentIntentId) => { await activatePlan(payPlan.id, paymentIntentId); setPayPlan(null); await place(); }} />
               </>}
             </div>
             <CartSummary items={items} catalog={catalog} hideCta />

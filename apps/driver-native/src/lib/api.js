@@ -25,28 +25,31 @@ export const api = {
 };
 
 export const driverLogin = (email, password) => api.post('/api/auth/driver-login', { email, password });
+export const getUser = (userId) => api.get(`/api/users/${userId}`);
+export const getShift = (driverId) => api.get(`/api/drivers/${driverId}/shift`);
+export const clockIn = (driverId, pos) => api.post(`/api/drivers/${driverId}/clock-in`, pos);
+export const clockOut = (driverId) => api.post(`/api/drivers/${driverId}/clock-out`);
 export const getJobs = (driverId) => api.get(`/api/drivers/${driverId}/jobs`);
 export const getOrder = (orderId) => api.get(`/api/orders/${orderId}`);
 export const setOrderStatus = (orderId, status) => api.post(`/api/orders/${orderId}/status`, { status });
+export const pushLocation = (driverId, pos) => api.post(`/api/drivers/${driverId}/location`, pos);
+export const simulateDrive = (orderId) => api.post(`/api/demo/orders/${orderId}/simulate-drive`, {});
+export const getReviewLink = (orderId) => api.get(`/api/orders/${orderId}/review-link`);
+export const generateTags = (orderId) => api.post(`/api/orders/${orderId}/generate-tags`);
+export const advanceByTag = (code) => api.post(`/api/garments/by-tag/${code}/advance`, { actor: 'scan' });
 
-// Driver-relevant status transitions only — factory/ops own the in-between steps
-// (at_facility → confirmed → processing → ready) via their own consoles.
-export const DRIVER_ADVANCE = {
-  assigned: 'driver_en_route',
-  driver_en_route: 'picked_up',
-  out_for_delivery: 'delivered',
+// driver actions mapped to the next status they can set — ported 1:1 from
+// apps/driver/src/App.jsx's ACTIONS map so the label copy matches web exactly.
+export const ACTIONS = {
+  assigned: { next: 'driver_en_route', label: 'Start route to customer' },
+  driver_en_route: { next: 'picked_up', label: 'Mark picked up' },
+  picked_up: { next: 'at_facility', label: 'Dropped at facility' },
+  ready: { next: 'out_for_delivery', label: 'Start delivery' },
+  out_for_delivery: { next: 'delivered', label: 'Mark delivered' },
 };
 
-export const STATUS_LABEL = {
-  placed: 'Order placed',
-  assigned: 'Assigned to you',
-  driver_en_route: 'Heading to pickup',
-  picked_up: 'Picked up',
-  at_facility: 'At the facility',
-  confirmed: 'Confirmed at facility',
-  processing: 'Being cleaned',
-  ready: 'Ready for delivery',
-  out_for_delivery: 'Out for delivery',
-  delivered: 'Delivered',
-  completed: 'Completed',
+export const HANDOVER = {
+  hand_to_me: { label: 'Hand to me', icon: '🙋', sub: "I'll pass the laundry to the driver" },
+  leave_at_door: { label: 'Leave at my door', icon: '🚪', sub: 'Driver collects it from your door' },
+  someone_else: { label: 'Someone else will hand over', icon: '🧑‍🤝‍🧑', sub: 'A friend, family member or concierge' },
 };

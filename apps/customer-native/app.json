@@ -11,16 +11,37 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
+        "backgroundColor": "#1D2951",
+        "foregroundImage": "./assets/android-icon-foreground.png"
       },
-      "package": "com.chaselaundry.customer",
-      "usesCleartextTraffic": true
+      "package": "com.chaselaundry.customer"
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "ca2ea770-af01-40f3-918a-97051945d2ef"
+      }
+    },
+    "owner": "subarna_m",
+    "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ],
+      "expo-font",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-mark.png",
+          "backgroundColor": "#1D2951"
+        }
+      ]
+    ]
   }
 }

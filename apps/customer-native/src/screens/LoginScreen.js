@@ -1,101 +1,114 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, Pressable, StyleSheet, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, KeyboardAvoidingView, Platform, ScrollView, Pressable } from 'react-native';
+import { Logo, Card, Field, Button, useTheme } from '@chaselaundry/shared-native';
 import { requestOtp, verifyOtp } from '../lib/api';
 import { saveCustomer } from '../lib/session';
-import { colors } from '../theme';
 
 export default function LoginScreen({ onLoggedIn }) {
-  const [stage, setStage] = useState('email'); // email → code
-  const [email, setEmail] = useState('');
+  const t = useTheme();
+  const [step, setStep] = useState('identify'); // identify | verify
+  const [identifier, setIdentifier] = useState('');
+  const [sent, setSent] = useState(null); // { sent_to, is_new }
   const [code, setCode] = useState('');
-  const [error, setError] = useState('');
+  const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
 
-  const sendCode = async () => {
-    setError('');
-    setBusy(true);
+  const requestCode = async () => {
+    setErr(''); setBusy(true);
     try {
-      await requestOtp(email.trim());
-      setStage('code');
-    } catch (e) {
-      setError(e.message || 'Could not send code');
-    } finally {
-      setBusy(false);
-    }
+      const res = await requestOtp(identifier.trim());
+      setSent(res); setCode(''); setName(''); setStep('verify');
+    } catch (e) { setErr(e.message || 'Could not send code. Try again.'); }
+    finally { setBusy(false); }
   };
 
   const verify = async () => {
-    setError('');
-    setBusy(true);
+    setErr(''); setBusy(true);
     try {
-      const { user } = await verifyOtp(email.trim(), code.trim());
+      const { user } = await verifyOtp(identifier.trim(), code, name);
       await saveCustomer(user);
       onLoggedIn(user);
-    } catch (e) {
-      setError(e.message || 'Incorrect code');
-    } finally {
-      setBusy(false);
-    }
+    } catch (e) { setErr(e.message || 'Could not verify code. Try again.'); }
+    finally { setBusy(false); }
   };
 
-  return (
-    <KeyboardAvoidingView style={styles.page} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <Text style={styles.brand}>Chase<Text style={{ color: colors.limeD }}>Laundry</Text></Text>
-      <Text style={styles.subtitle}>More life. Less laundry.</Text>
+  const reset = () => { setStep('identify'); setCode(''); setErr(''); setSent(null); };
 
-      <View style={styles.card}>
-        {stage === 'email' ? (
-          <>
-            <Text style={styles.label}>Email</Text>
-            <TextInput
-              style={styles.input}
-              value={email}
-              onChangeText={setEmail}
-              autoCapitalize="none"
-              autoFocus
-              keyboardType="email-address"
-              placeholder="you@example.com"
-            />
-            {!!error && <Text style={styles.error}>{error}</Text>}
-            <Pressable style={[styles.button, busy && { opacity: 0.6 }]} onPress={sendCode} disabled={busy || !email.trim()}>
-              {busy ? <ActivityIndicator color={colors.navy} /> : <Text style={styles.buttonText}>Send code</Text>}
-            </Pressable>
-          </>
-        ) : (
-          <>
-            <Text style={styles.label}>Enter the 6-digit code sent to {email}</Text>
-            <TextInput
-              style={styles.input}
-              value={code}
-              onChangeText={setCode}
-              keyboardType="number-pad"
-              maxLength={6}
-              autoFocus
-              placeholder="123456"
-            />
-            {!!error && <Text style={styles.error}>{error}</Text>}
-            <Pressable style={[styles.button, busy && { opacity: 0.6 }]} onPress={verify} disabled={busy || code.trim().length < 6}>
-              {busy ? <ActivityIndicator color={colors.navy} /> : <Text style={styles.buttonText}>Verify & continue</Text>}
-            </Pressable>
-            <Pressable onPress={() => setStage('email')} style={{ marginTop: 14 }}>
-              <Text style={styles.link}>Use a different email</Text>
-            </Pressable>
-          </>
-        )}
-      </View>
+  return (
+    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: t.navy }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', padding: 24 }} keyboardShouldPersistTaps="handled">
+        <View style={{ alignItems: 'center', marginBottom: 10 }}>
+          <Logo size={30} mode="dark" tagline />
+        </View>
+        <Text style={{ textAlign: 'center', color: 'rgba(255,255,255,.55)', fontSize: 14, marginBottom: 26 }}>
+          {step === 'identify' ? 'Sign in or create your account' : 'Enter the code to continue'}
+        </Text>
+
+        <Card>
+          {step === 'identify' ? (
+            <>
+              <Field label="Email address" autoCapitalize="none" keyboardType="email-address"
+                placeholder="you@email.com" value={identifier} onChangeText={setIdentifier} onSubmitEditing={requestCode} />
+              {!!err && <ErrBox color={t.danger}>{err}</ErrBox>}
+              <Button variant="lime" disabled={!identifier.trim() || busy} onPress={requestCode}>
+                {busy ? 'Sending code…' : 'Send code'}
+              </Button>
+              <Text style={{ textAlign: 'center', fontSize: 12, color: t.gray, marginTop: 12 }}>
+                No password needed — we'll email you a one-time code.
+              </Text>
+            </>
+          ) : (
+            <>
+              <Text style={{ fontSize: 13, color: t.gray, marginBottom: 14 }}>
+                We sent a 6-digit code to <Text style={{ fontFamily: 'Satoshi-Bold', color: t.navy }}>{sent?.sent_to}</Text>.
+              </Text>
+
+              {sent?.is_new && (
+                <Field label="Your name" placeholder="e.g. Alex Morgan" value={name} onChangeText={setName} />
+              )}
+
+              <View style={{ marginBottom: 14 }}>
+                <Text style={{ fontSize: 12, fontWeight: '700', color: t.gray, marginBottom: 6 }}>6-digit code</Text>
+                <Field
+                  keyboardType="number-pad"
+                  maxLength={6}
+                  placeholder="••••••"
+                  value={code}
+                  onChangeText={(v) => setCode(v.replace(/\D/g, ''))}
+                  onSubmitEditing={() => code.length === 6 && verify()}
+                  inputStyle={{ textAlign: 'center', fontSize: 26, fontFamily: 'Satoshi-Bold', letterSpacing: 10 }}
+                  style={{ marginBottom: 0 }}
+                />
+              </View>
+
+              {!!err && <ErrBox color={t.danger}>{err}</ErrBox>}
+
+              <Button variant="lime" disabled={code.length !== 6 || (sent?.is_new && !name.trim()) || busy} onPress={verify}>
+                {busy ? 'Verifying…' : sent?.is_new ? 'Create account' : 'Sign in'}
+              </Button>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 14 }}>
+                <Pressable onPress={reset}><Text style={{ color: t.gray, fontWeight: '600', fontSize: 13 }}>← Change</Text></Pressable>
+                <Pressable onPress={requestCode} disabled={busy}><Text style={{ color: t.navy, fontWeight: '700', fontSize: 13 }}>Resend code</Text></Pressable>
+              </View>
+
+              {sent?.is_new && (
+                <Text style={{ textAlign: 'center', fontSize: 12, color: t.gray, marginTop: 14 }}>
+                  🎁 New accounts get <Text style={{ fontFamily: 'Satoshi-Bold' }}>S$10</Text> welcome credit
+                </Text>
+              )}
+            </>
+          )}
+        </Card>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
-const styles = StyleSheet.create({
-  page: { flex: 1, backgroundColor: colors.navy, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  brand: { fontSize: 30, fontWeight: '900', color: '#fff', marginBottom: 2 },
-  subtitle: { fontSize: 13, fontWeight: '600', color: colors.gray3, marginBottom: 28 },
-  card: { width: '100%', maxWidth: 380, backgroundColor: '#fff', borderRadius: 16, padding: 20 },
-  label: { fontSize: 13, fontWeight: '700', color: colors.gray, marginBottom: 6 },
-  input: { borderWidth: 1.5, borderColor: colors.gray3, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, fontSize: 15, color: colors.navy, marginBottom: 4 },
-  error: { color: colors.danger, marginTop: 10, fontSize: 13, fontWeight: '600' },
-  button: { backgroundColor: colors.lime, borderRadius: 10, paddingVertical: 13, alignItems: 'center', marginTop: 16 },
-  buttonText: { color: colors.navy, fontWeight: '800', fontSize: 15 },
-  link: { color: colors.navy, fontWeight: '700', fontSize: 13, textAlign: 'center' },
-});
+function ErrBox({ children, color }) {
+  return (
+    <View style={{ backgroundColor: 'rgba(239,68,68,.1)', borderRadius: 10, padding: 12, marginBottom: 12 }}>
+      <Text style={{ color, fontSize: 13, fontWeight: '600' }}>{children}</Text>
+    </View>
+  );
+}

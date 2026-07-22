@@ -1,77 +1,126 @@
-import React, { useCallback, useState } from 'react';
-import { View, Text, FlatList, Pressable, StyleSheet, RefreshControl } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { View, Text, Pressable, FlatList, RefreshControl } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { getJobs, STATUS_LABEL } from '../lib/api';
-import { colors } from '../theme';
+import { TopBar, Logo, Chip, Card, Avatar, Button, StatusPill, Empty, useTheme, fmt, satoshi } from '@chaselaundry/shared-native';
+import { getUser, getShift, getJobs, clockIn, clockOut, ACTIONS } from '../lib/api';
+import { getPos } from '../lib/location';
+import JobDetailSheet from './JobDetail';
 
-export default function JobsScreen({ driver, onLogout, navigation }) {
+export default function JobsScreen({ driver: driverProp, onLogout }) {
+  const t = useTheme();
+  const [driver, setDriver] = useState(driverProp);
+  const [shift, setShift] = useState(null);
   const [jobs, setJobs] = useState([]);
+  const [openJob, setOpenJob] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState('');
 
   const load = useCallback(async () => {
-    try {
-      setError('');
-      setJobs(await getJobs(driver.id));
-    } catch (e) {
-      setError(e.message || 'Could not load jobs');
-    }
-  }, [driver.id]);
+    const [d, s, j] = await Promise.all([
+      getUser(driverProp.id),
+      getShift(driverProp.id),
+      getJobs(driverProp.id),
+    ]);
+    setDriver(d); setShift(s); setJobs(j);
+  }, [driverProp.id]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const onRefresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
 
   return (
-    <View style={styles.page}>
-      <View style={styles.header}>
-        <View>
-          <Text style={styles.hi}>Hi, {driver.name?.split(' ')[0]}</Text>
-          <Text style={styles.sub}>{jobs.length} active job{jobs.length === 1 ? '' : 's'}</Text>
-        </View>
-        <Pressable onPress={onLogout}><Text style={styles.logout}>Log out</Text></Pressable>
-      </View>
-
-      {!!error && <Text style={styles.error}>{error}</Text>}
-
+    <View style={{ flex: 1, backgroundColor: t.bg }}>
+      <TopBar
+        left={<Logo size={18} mode="dark" />}
+        right={
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <Chip variant="navy">DRIVER</Chip>
+            <Pressable onPress={onLogout}><Text style={{ fontSize: 12, color: 'rgba(255,255,255,.6)' }}>Log out</Text></Pressable>
+          </View>
+        }
+      />
       <FlatList
-        data={jobs}
-        keyExtractor={(o) => o.id}
-        contentContainerStyle={{ padding: 16, gap: 12 }}
+        data={shift ? jobs : []}
+        keyExtractor={(j) => j.id}
+        contentContainerStyle={{ paddingBottom: 30 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-        ListEmptyComponent={<Text style={styles.empty}>No active jobs assigned right now.</Text>}
+        ListHeaderComponent={<ShiftCard driver={driver} shift={shift} onChange={load} />}
+        ListHeaderComponentStyle={{ paddingHorizontal: 18, paddingTop: 18 }}
+        ListEmptyComponent={
+          shift
+            ? <Empty icon="✅" title="No active jobs" sub="You're all caught up" />
+            : <View style={{ paddingHorizontal: 18 }}><Empty icon="⏰" title="You're off the clock" sub="Clock in to receive jobs" /></View>
+        }
         renderItem={({ item }) => (
-          <Pressable style={styles.card} onPress={() => navigation.navigate('JobDetail', { orderId: item.id })}>
-            <View style={styles.cardTop}>
-              <Text style={styles.code}>{item.code}</Text>
-              <View style={styles.pill}><Text style={styles.pillText}>{STATUS_LABEL[item.status] || item.status}</Text></View>
-            </View>
-            <Text style={styles.customer}>{item.customer?.name}</Text>
-            <Text style={styles.address} numberOfLines={1}>
-              {item.address ? `${item.address.line1}, ${item.address.city}` : 'No address on file'}
-            </Text>
-            <Text style={styles.items}>{item.items?.length || 0} item{(item.items?.length || 0) === 1 ? '' : 's'} · {item.pickup_slot || 'No slot set'}</Text>
-          </Pressable>
+          <View style={{ paddingHorizontal: 18 }}>
+            <JobRow job={item} onPress={() => setOpenJob(item.id)} />
+          </View>
         )}
       />
+      <JobDetailSheet jobId={openJob} onClose={() => { setOpenJob(null); load(); }} />
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  page: { flex: 1, backgroundColor: colors.bg },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', backgroundColor: colors.navy, padding: 20, paddingTop: 56 },
-  hi: { color: '#fff', fontSize: 20, fontWeight: '800' },
-  sub: { color: colors.gray3, fontSize: 13, marginTop: 2 },
-  logout: { color: colors.lime, fontWeight: '700', fontSize: 13 },
-  error: { color: colors.danger, textAlign: 'center', marginTop: 12, fontWeight: '600' },
-  empty: { textAlign: 'center', color: colors.gray2, marginTop: 40, fontSize: 14 },
-  card: { backgroundColor: '#fff', borderRadius: 14, padding: 16 },
-  cardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
-  code: { fontWeight: '900', fontSize: 16, color: colors.navy },
-  pill: { backgroundColor: colors.limePale, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
-  pillText: { color: colors.navy, fontWeight: '700', fontSize: 11 },
-  customer: { fontWeight: '700', fontSize: 14, color: colors.navy, marginBottom: 2 },
-  address: { color: colors.gray, fontSize: 13, marginBottom: 6 },
-  items: { color: colors.gray2, fontSize: 12, fontWeight: '600' },
-});
+function ShiftCard({ driver, shift, onChange }) {
+  const t = useTheme();
+  const [elapsed, setElapsed] = useState('');
+
+  useEffect(() => {
+    if (!shift) return;
+    const tick = () => {
+      const ms = Date.now() - new Date(shift.clock_in).getTime();
+      const h = Math.floor(ms / 3600e3), m = Math.floor((ms % 3600e3) / 60e3), s = Math.floor((ms % 60e3) / 1000);
+      setElapsed(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`);
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [shift]);
+
+  const onClockIn = async () => { const pos = await getPos(); await clockIn(driver.id, pos); onChange(); };
+  const onClockOut = async () => { await clockOut(driver.id); onChange(); };
+
+  return (
+    <Card style={shift ? { backgroundColor: t.navy2, marginBottom: 14 } : { marginBottom: 14 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+          <Avatar name={driver?.name} size={46} color={shift ? t.accent : t.navy} />
+          <View>
+            <Text style={{ fontFamily: satoshi(900), fontSize: 16, color: shift ? '#fff' : t.text }}>{driver?.name}</Text>
+            <Text style={{ fontSize: 12, color: shift ? t.accent : t.gray }}>{shift ? '● On shift' : '○ Off shift'}</Text>
+          </View>
+        </View>
+        {shift && (
+          <View style={{ alignItems: 'flex-end' }}>
+            <Text style={{ fontSize: 22, fontFamily: satoshi(900), color: '#fff', fontVariant: ['tabular-nums'] }}>{elapsed}</Text>
+            <Text style={{ fontSize: 10, color: 'rgba(255,255,255,.4)' }}>since {fmt.time(shift.clock_in)}</Text>
+          </View>
+        )}
+      </View>
+      <View style={{ marginTop: 16 }}>
+        {shift
+          ? <Button variant="ghost" style={{ backgroundColor: 'rgba(255,255,255,.12)' }} textStyle={{ color: '#fff' }} onPress={onClockOut}>Clock out</Button>
+          : <Button variant="lime" onPress={onClockIn}>Clock in & go online</Button>}
+      </View>
+    </Card>
+  );
+}
+
+function JobRow({ job, onPress }) {
+  const t = useTheme();
+  const a = ACTIONS[job.status];
+  return (
+    <Card onPress={onPress} style={{ marginBottom: 10 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontFamily: satoshi(800), color: t.text }}>{job.code} · {job.customer?.name}</Text>
+          <Text style={{ color: t.gray, fontSize: 12, marginTop: 2 }} numberOfLines={1}>
+            📍 {job.address?.line1}, {job.address?.postcode}
+          </Text>
+        </View>
+        <StatusPill status={job.status} label={job.status_label} />
+      </View>
+      {a && <Text style={{ marginTop: 10, color: t.navy, fontFamily: satoshi(700), fontSize: 13 }}>→ {a.label}</Text>}
+    </Card>
+  );
+}

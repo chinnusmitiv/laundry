@@ -9,6 +9,7 @@
   "workspaces": [
     "server",
     "shared",
+    "packages/*",
     "apps/*"
   ],
   "scripts": {
