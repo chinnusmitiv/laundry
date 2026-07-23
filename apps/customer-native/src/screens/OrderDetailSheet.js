@@ -2,10 +2,10 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, TextInput, Pressable } from 'react-native';
 import {
   Sheet, Card, Chip, StatusPill, Button, GarmentJourney, OneMap, PaymentSheet, Empty,
-  useTheme, satoshi, fmt, STATUS_FLOW, STATUS_LABEL, HANDOVER, GARMENT_LABEL, distKm, etaMins,
+  useTheme, satoshi, fmt, STATUS_FLOW, STATUS_LABEL, HANDOVER, GARMENT_LABEL, distKm, etaMins, downloadInvoice,
 } from '@chaselaundry/shared-native';
 import Loading from '../components/Loading';
-import { getOrder, payOrder, submitReview, simulateDrive, confirmPayment } from '../lib/api';
+import { getOrder, payOrder, submitReview, simulateDrive, createPaymentIntent } from '../lib/api';
 
 export default function OrderDetailSheet({ orderId, onClose }) {
   const t = useTheme();
@@ -38,6 +38,10 @@ export default function OrderDetailSheet({ orderId, onClose }) {
   const km = driver?.lat && o?.address?.lat ? distKm(driver, o.address) : null;
   const etaMin = etaMins(km);
   const simulate = () => simulateDrive(orderId).then((r) => setO((cur) => (cur ? { ...cur, location: r.location } : cur)));
+  // matches server's /api/orders/:id/pay: an authorized hold settles for the held
+  // amount (which can drift from the order's current total after an edit), everything
+  // else charges the order's current total.
+  const payAmount = o ? (o.payment_status === 'authorized' ? (o.hold_amount_cents ?? o.total_cents) : o.total_cents) : 0;
 
   return (
     <Sheet open={!!orderId} onClose={onClose} title={o ? o.code : 'Loading…'}>
@@ -126,21 +130,22 @@ export default function OrderDetailSheet({ orderId, onClose }) {
                 <Text style={{ fontSize: 20 }}>💳</Text>
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontFamily: satoshi(800), fontSize: 14 }}>{fmt.money(o.hold_amount_cents || o.total_cents)} held on your card</Text>
-                  <Text style={{ color: t.gray, fontSize: 12 }}>You're only charged once your order is delivered.</Text>
+                  <Text style={{ color: t.gray, fontSize: 12 }}>You're only charged once your order is delivered — or pay now below.</Text>
                 </View>
               </View>
             </Card>
           )}
-          {['pending', 'voided'].includes(o.payment_status) && o.status !== 'cancelled' && (
-            <View style={{ marginBottom: 10 }}><Button variant="lime" onPress={() => setPayOpen(true)}>Pay {fmt.money(o.total_cents)}</Button></View>
+          {['pending', 'voided', 'authorized'].includes(o.payment_status) && o.status !== 'cancelled' && (
+            <View style={{ marginBottom: 10 }}><Button variant="lime" onPress={() => setPayOpen(true)}>Pay {fmt.money(payAmount)}</Button></View>
           )}
 
-          <PaymentSheet open={payOpen} onClose={() => setPayOpen(false)} amountCents={o.total_cents}
-            title="Complete payment" description={o.code} confirmPayment={confirmPayment}
-            onAuthorized={async () => { await payOrder(o.id); reload(); }} />
+          <PaymentSheet open={payOpen} onClose={() => setPayOpen(false)} amountCents={payAmount}
+            title="Complete payment" description={o.code} createPaymentIntent={createPaymentIntent}
+            onAuthorized={async (paymentIntentId) => { await payOrder(o.id, paymentIntentId); reload(); }} />
 
           {o.status === 'completed' && <View style={{ marginBottom: 10 }}><Button variant="ghost" onPress={() => setReviewOpen(true)}>★ Rate this order</Button></View>}
 
+          <View style={{ marginBottom: 10 }}><Button variant="ghost" onPress={() => downloadInvoice(o)}>🧾 Download invoice</Button></View>
           <View style={{ marginBottom: 10 }}><Button variant="ghost" onPress={onClose}>Close</Button></View>
 
           <ReviewSheet open={reviewOpen} onClose={() => setReviewOpen(false)} order={o} />

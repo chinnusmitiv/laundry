@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, ScrollView, Pressable } from 'react-native';
 import { Card, Chip, Button, Sheet, PaymentSheet, Empty, useTheme, satoshi, fmt } from '@chaselaundry/shared-native';
 import Loading from './Loading';
-import { getPacks, buyPack, confirmPayment } from '../lib/api';
+import { getPacks, buyPack, createPaymentIntent } from '../lib/api';
 
 export default function PacksSection({ customer, onReload }) {
   const t = useTheme();
@@ -16,8 +16,8 @@ export default function PacksSection({ customer, onReload }) {
 
   if (!data) return <Loading />;
 
-  const buy = async () => {
-    await buyPack(customer.id, buying.catalog_id, buying.tier.qty);
+  const buy = async (paymentIntentId) => {
+    await buyPack(customer.id, buying.catalog_id, buying.tier.qty, paymentIntentId);
     setBuying(null); setPayAmount(0); await load(); onReload?.();
   };
 
@@ -94,7 +94,7 @@ export default function PacksSection({ customer, onReload }) {
 
       <PaymentSheet open={payAmount > 0} onClose={() => setPayAmount(0)} amountCents={payAmount} cta="Buy pack"
         title={buying ? `Buy ${buying.name} pack` : ''} description={buying ? `${buying.tier.qty}${buying.unit === 'per_kg' ? 'kg' : ' items'}` : ''}
-        confirmPayment={confirmPayment} onAuthorized={buy} />
+        createPaymentIntent={createPaymentIntent} onAuthorized={buy} />
     </View>
   );
 }

@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, Pressable } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { StripeProvider } from '@stripe/stripe-react-native';
 import * as SplashScreen from 'expo-splash-screen';
 import { ThemeProvider, customerTheme, useSatoshiFonts, useTheme, TopBar, Logo, BottomNav } from '@chaselaundry/shared-native';
 import LoginScreen from './src/screens/LoginScreen';
@@ -35,12 +36,14 @@ export default function App() {
   if (!sessionReady || !fontsLoaded) return null;
 
   return (
-    <ThemeProvider theme={customerTheme}>
-      <SafeAreaProvider>
-        <StatusBar style="light" />
-        {!customer ? <LoginScreen onLoggedIn={setCustomer} /> : <CustomerApp customer={customer} onLogout={onLogout} />}
-      </SafeAreaProvider>
-    </ThemeProvider>
+    <StripeProvider publishableKey={process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY || ''}>
+      <ThemeProvider theme={customerTheme}>
+        <SafeAreaProvider>
+          <StatusBar style="light" />
+          {!customer ? <LoginScreen onLoggedIn={setCustomer} /> : <CustomerApp customer={customer} onLogout={onLogout} />}
+        </SafeAreaProvider>
+      </ThemeProvider>
+    </StripeProvider>
   );
 }
 

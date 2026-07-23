@@ -45,18 +45,19 @@ export const getOrders = (customerId) => api.get(`/api/customers/${customerId}/o
 export const getOrder = (orderId) => api.get(`/api/orders/${orderId}`);
 export const quoteOrder = (payload) => api.post('/api/orders/quote', payload);
 export const placeOrder = (payload) => api.post('/api/orders', payload);
-export const payOrder = (orderId) => api.post(`/api/orders/${orderId}/pay`);
+export const payOrder = (orderId, paymentIntentId) => api.post(`/api/orders/${orderId}/pay`, { payment_intent_id: paymentIntentId });
 export const submitReview = (orderId, payload) => api.post(`/api/orders/${orderId}/review`, payload);
 export const confirmPayment = (payload) => api.post('/api/payments/confirm', payload);
+export const createPaymentIntent = (amountCents, description) => api.post('/api/payments/create-intent', { amount_cents: amountCents, description });
 
 // wallet / packs / referrals / subscriptions
 export const getCredits = (customerId) => api.get(`/api/customers/${customerId}/credits`);
-export const topup = (customerId, amountCents) => api.post(`/api/customers/${customerId}/topup`, { amount_cents: amountCents });
+export const topup = (customerId, amountCents, paymentIntentId) => api.post(`/api/customers/${customerId}/topup`, { amount_cents: amountCents, payment_intent_id: paymentIntentId });
 export const getPacks = (customerId) => api.get(`/api/customers/${customerId}/packs`);
-export const buyPack = (customerId, catalogId, qty) => api.post(`/api/customers/${customerId}/packs`, { catalog_id: catalogId, qty });
+export const buyPack = (customerId, catalogId, qty, paymentIntentId) => api.post(`/api/customers/${customerId}/packs`, { catalog_id: catalogId, qty, payment_intent_id: paymentIntentId });
 export const getReferrals = (customerId) => api.get(`/api/customers/${customerId}/referrals`);
 export const inviteReferral = (customerId, email) => api.post(`/api/customers/${customerId}/referrals`, { email });
-export const activateSubscription = (customerId, planId) => api.post(`/api/customers/${customerId}/subscription`, { plan_id: planId });
+export const activateSubscription = (customerId, planId, paymentIntentId) => api.post(`/api/customers/${customerId}/subscription`, { plan_id: planId, payment_intent_id: paymentIntentId });
 export const cancelSubscription = (customerId) => api.post(`/api/customers/${customerId}/subscription/cancel`);
 
 // notifications

@@ -8,7 +8,7 @@ import ServicePicker from '../components/ServicePicker';
 import AddAddress from '../components/AddAddress';
 import Loading from '../components/Loading';
 import {
-  getCatalog, getPlans, quoteOrder, placeOrder, activateSubscription, confirmPayment,
+  getCatalog, getPlans, quoteOrder, placeOrder, activateSubscription, createPaymentIntent,
 } from '../lib/api';
 
 export default function OrderFlowSheet({ open, seed, customer, summary, onClose, onPlaced }) {
@@ -70,7 +70,7 @@ export default function OrderFlowSheet({ open, seed, customer, summary, onClose,
     setPlacing(false); onPlaced(o);
   };
 
-  const activatePlan = (plan_id) => activateSubscription(customer.id, plan_id);
+  const activatePlan = (plan_id, paymentIntentId) => activateSubscription(customer.id, plan_id, paymentIntentId);
 
   const placeWithUpsell = async () => {
     if (upsellPlan) {
@@ -264,8 +264,8 @@ export default function OrderFlowSheet({ open, seed, customer, summary, onClose,
             <PaymentSheet
               open={!!payPlan} onClose={() => setPayPlan(null)} amountCents={payPlan?.price_cents || 0}
               recurring cta="Subscribe & pay" title={payPlan ? `Subscribe to ${payPlan.name}` : ''} description={payPlan ? `${payPlan.name} plan` : ''}
-              confirmPayment={confirmPayment}
-              onAuthorized={async () => { await activatePlan(payPlan.id); setPayPlan(null); await place(); }}
+              createPaymentIntent={createPaymentIntent}
+              onAuthorized={async (paymentIntentId) => { await activatePlan(payPlan.id, paymentIntentId); setPayPlan(null); await place(); }}
             />
           </View>
         )

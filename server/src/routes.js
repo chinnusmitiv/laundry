@@ -1,7 +1,7 @@
 import { nanoid } from 'nanoid';
 import { randomInt } from 'node:crypto';
 import { db, STATUS_FLOW, STATUS_LABEL, GARMENT_FLOW } from './db.js';
-import { payments, bank, email, google, notify, stepToward, distanceKm } from './services.js';
+import { payments, bank, email, google, notify, stepToward, distanceKm, sendRealEmail } from './services.js';
 import { createPaymentIntent, retrievePaymentIntent } from './stripe.js';
 import { searchPlaces, searchOneMap } from './places.js';
 import { hashPassword } from './crypto.js';
@@ -653,12 +653,21 @@ export function registerRoutes(app, io) {
       referrals: db.prepare('SELECT * FROM referrals WHERE referrer_id = ? ORDER BY created_at DESC').all(req.params.id),
     });
   });
-  app.post('/api/customers/:id/referrals', (req, res) => {
+  app.post('/api/customers/:id/referrals', async (req, res) => {
     const u = getUser(req.params.id);
     const code = (u?.name || 'CHASE').split(' ')[0].toUpperCase() + '-CHASE';
     const r = { id: id('ref'), referrer_id: req.params.id, code, referee_email: req.body.email, status: 'sent', reward_cents: 500, created_at: now() };
     db.prepare('INSERT INTO referrals (id,referrer_id,code,referee_email,status,reward_cents,created_at) VALUES (?,?,?,?,?,?,?)')
       .run(r.id, r.referrer_id, r.code, r.referee_email, r.status, r.reward_cents, r.created_at);
+    try {
+      await sendRealEmail({
+        to: r.referee_email,
+        subject: `${u?.name || 'A friend'} invited you to ChaseLaundry — get S$5 credit`,
+        body: `${u?.name || 'A friend'} thinks you'll love ChaseLaundry and wants to give you S$5.00 credit on your first order.\n\nUse referral code ${code} when you sign up — you'll both get S$5.00 once you place your first order.`,
+      });
+    } catch (e) {
+      console.warn(`⚠️  Referral invite email to ${r.referee_email} not sent (${e.message})`);
+    }
     res.json(r);
   });
 

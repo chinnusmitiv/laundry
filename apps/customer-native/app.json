@@ -3,6 +3,7 @@
     "name": "ChaseLaundry",
     "slug": "chaselaundry-customer",
     "version": "1.0.0",
+    "scheme": "chaselaundrycustomer",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -19,12 +20,7 @@
     "web": {
       "favicon": "./assets/favicon.png"
     },
-    "extra": {
-      "eas": {
-        "projectId": "ca2ea770-af01-40f3-918a-97051945d2ef"
-      }
-    },
-    "owner": "subarna_m",
+    "owner": "subarnam",
     "plugins": [
       [
         "expo-build-properties",
@@ -41,7 +37,17 @@
           "image": "./assets/splash-mark.png",
           "backgroundColor": "#1D2951"
         }
-      ]
-    ]
+      ],
+      [
+        "@stripe/stripe-react-native",
+        {}
+      ],
+      "expo-sharing"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "0d5b1df0-5171-4d01-9796-d5b660deba87"
+      }
+    }
   }
 }

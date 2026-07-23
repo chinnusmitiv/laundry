@@ -4,7 +4,7 @@ import { Card, Button, TopUpSheet, PaymentSheet, useTheme, satoshi, fmt, topupBo
 import Loading from '../components/Loading';
 import PacksSection from '../components/PacksSection';
 import ReferralCard from '../components/ReferralCard';
-import { getCredits, topup, confirmPayment } from '../lib/api';
+import { getCredits, topup, createPaymentIntent } from '../lib/api';
 
 const TYPE_ICON = { referral: '🎁', in_store: '💚', signup: '👋', refund: '↩️', spend: '🧾', adjustment: '⚙️', topup: '➕', bonus: '🎁' };
 
@@ -31,8 +31,8 @@ export default function WalletScreen({ customer, onReload }) {
       <TopUpSheet open={topupOpen} onClose={() => setTopupOpen(false)} onContinue={(amt) => { setTopupOpen(false); setPayAmount(amt); }} />
       <PaymentSheet open={payAmount > 0} onClose={() => setPayAmount(0)} amountCents={payAmount} cta="Top up"
         title="Top up wallet" description={`+ ${fmt.money(payAmount + topupBonus(payAmount).bonus)} credit`}
-        confirmPayment={confirmPayment}
-        onAuthorized={async () => { await topup(customer.id, payAmount); await loadWallet(); onReload?.(); }} />
+        createPaymentIntent={createPaymentIntent}
+        onAuthorized={async (paymentIntentId) => { await topup(customer.id, payAmount, paymentIntentId); await loadWallet(); onReload?.(); }} />
 
       <PacksSection customer={customer} onReload={onReload} />
       <ReferralCard customer={customer} />

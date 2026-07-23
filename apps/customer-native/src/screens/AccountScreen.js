@@ -6,7 +6,7 @@ import MenuRow from '../components/MenuRow';
 import AddAddress from '../components/AddAddress';
 import AddressRow from '../components/AddressRow';
 import ReferralCard from '../components/ReferralCard';
-import { getPlans, activateSubscription, cancelSubscription, updateProfile, confirmPayment } from '../lib/api';
+import { getPlans, activateSubscription, cancelSubscription, updateProfile, createPaymentIntent } from '../lib/api';
 
 export default function AccountScreen({ customer, summary, orders = [], onOpenOrder, onOrder, onReload, onTab, onLogout, openOrders = 0 }) {
   const t = useTheme();
@@ -122,7 +122,7 @@ function SubscriptionsSheet({ open, onClose, customer, summary, onReload }) {
   useEffect(() => { if (open) getPlans().then(setPlans); }, [open]);
   const current = summary.subscription?.plan_id || 'plan_lite';
 
-  const activate = (plan_id) => activateSubscription(customer.id, plan_id).then(onReload);
+  const activate = (plan_id, paymentIntentId) => activateSubscription(customer.id, plan_id, paymentIntentId).then(onReload);
   const choose = (plan) => { if (plan.price_cents) setPayPlan(plan); else activate(plan.id); };
   const cancel = async () => { await cancelSubscription(customer.id); onReload(); };
 
@@ -155,7 +155,7 @@ function SubscriptionsSheet({ open, onClose, customer, summary, onReload }) {
       })}
       <PaymentSheet open={!!payPlan} onClose={() => setPayPlan(null)} amountCents={payPlan?.price_cents || 0}
         recurring cta="Subscribe" title={payPlan ? `Subscribe to ${payPlan.name}` : ''} description={payPlan ? `${payPlan.name} plan` : ''}
-        confirmPayment={confirmPayment} onAuthorized={async () => { await activate(payPlan.id); }} />
+        createPaymentIntent={createPaymentIntent} onAuthorized={async (paymentIntentId) => { await activate(payPlan.id, paymentIntentId); }} />
     </Sheet>
   );
 }
