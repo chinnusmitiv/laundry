@@ -10,7 +10,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "http://13.228.21.160:4000",
+        "EXPO_PUBLIC_API_URL": "https://api.chaselaundry.com",
         "EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY": "pk_test_51TvuVrGgmLUAGHg3luMEKAGRoDdkH1HZekl8OgSDUvUhwFILJzrNXhqDk9TDoxIYOv1dJJsNjEvhH45Y9TRBmlYs00tPkhcp2y"
       }
     }

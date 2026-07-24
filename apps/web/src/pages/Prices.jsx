@@ -16,7 +16,7 @@ export default function Prices() {
     const c = catalog.find((x) => x.id === id);
     return sum + (c ? c.price_cents * (v.qty || v.weight || 0) : 0);
   }, 0);
-  const book = () => nav('/order');
+  const book = () => nav('/order', { state: { cart } });
 
   return (
     <div className="app-page">

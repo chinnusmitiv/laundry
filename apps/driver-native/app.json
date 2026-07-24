@@ -14,17 +14,16 @@
         "backgroundColor": "#C7FF33",
         "foregroundImage": "./assets/android-icon-foreground.png"
       },
-      "package": "com.chaselaundry.driver"
+      "package": "com.chaselaundry.driver",
+      "permissions": [
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
-    "extra": {
-      "eas": {
-        "projectId": "bda862bf-7ec8-446d-8a6e-01c3aefe4178"
-      }
-    },
-    "owner": "subarna_m",
+    "owner": "subarnam",
     "plugins": [
       [
         "expo-build-properties",
@@ -47,7 +46,17 @@
         {
           "locationWhenInUsePermission": "ChaseLaundry Driver uses your location to log clock-in/out and send live tracking updates to customers during pickup and delivery."
         }
-      ]
-    ]
+      ],
+      [
+        "@stripe/stripe-react-native",
+        {}
+      ],
+      "expo-sharing"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "acd6db35-7568-434e-b679-bec323af5299"
+      }
+    }
   }
 }

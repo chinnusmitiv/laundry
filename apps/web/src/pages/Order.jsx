@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { api, fmt, PlacesAutocomplete, HANDOVER, ADDRESS_TYPES, REPEAT_CADENCE, Card, Button, Chip, CATEGORY_CHIPS, CATEGORY_DESC, etaLabel, PaymentSheet } from '@shared';
 import { customerId } from '../auth.js';
 import WebServicePicker from './ServicePicker.jsx';
@@ -8,10 +8,13 @@ const CUSTOMER_ID = customerId();
 
 export default function Order() {
   const nav = useNavigate();
-  const [step, setStep] = useState(1);
+  const location = useLocation();
+  const seedCart = location.state?.cart;
+  const skipItemStep = !!(seedCart && Object.keys(seedCart).length);
+  const [step, setStep] = useState(skipItemStep ? 2 : 1);
   const [catalog, setCatalog] = useState([]);
   const [summary, setSummary] = useState(null);
-  const [cart, setCart] = useState({});
+  const [cart, setCart] = useState(seedCart || {});
   const [slot, setSlot] = useState('Today · 18:00–20:00');
   const [useCredit, setUseCredit] = useState(true);
   const [quote, setQuote] = useState(null);
