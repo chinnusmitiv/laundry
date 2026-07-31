@@ -42,7 +42,11 @@
         "@stripe/stripe-react-native",
         {}
       ],
-      "expo-sharing"
+      "expo-sharing",
+      [
+        "expo-notifications",
+        {}
+      ]
     ],
     "extra": {
       "eas": {

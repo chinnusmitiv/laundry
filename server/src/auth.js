@@ -19,7 +19,7 @@ const initials = (name) =>
 
 const publicUser = (u) => {
   if (!u) return null;
-  const { password_hash, ...rest } = u;
+  const { password_hash, push_token, ...rest } = u;
   return rest;
 };
 
@@ -89,6 +89,10 @@ export function registerAuthRoutes(app, io) {
         .run(uid, 'customer', name, c.email, null, initials(name), null, now());
       db.prepare('INSERT INTO credits (id,user_id,amount_cents,type,reason,order_id,created_at) VALUES (?,?,?,?,?,?,?)')
         .run(id('cr'), uid, WELCOME_CREDIT_CENTS, 'signup', 'Welcome credit', null, now());
+      // if this email was invited via someone's referral link, join them to it now —
+      // the reward itself is granted once they complete their first order (see routes.js)
+      const pendingRef = db.prepare(`SELECT * FROM referrals WHERE LOWER(referee_email) = ? AND status = 'sent'`).get(c.email);
+      if (pendingRef) db.prepare(`UPDATE referrals SET status = 'joined', referee_id = ? WHERE id = ?`).run(uid, pendingRef.id);
       user = db.prepare('SELECT * FROM users WHERE id = ?').get(uid);
     }
     res.json({ user: publicUser(user) });

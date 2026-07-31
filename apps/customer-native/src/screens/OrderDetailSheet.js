@@ -2,10 +2,12 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, TextInput, Pressable } from 'react-native';
 import {
   Sheet, Card, Chip, StatusPill, Button, GarmentJourney, OneMap, PaymentSheet, Empty,
-  useTheme, satoshi, fmt, STATUS_FLOW, STATUS_LABEL, HANDOVER, GARMENT_LABEL, distKm, etaMins, downloadInvoice,
+  useTheme, satoshi, fmt, STATUS_FLOW, STATUS_LABEL, HANDOVER, GARMENT_LABEL, distKm, etaMins, downloadInvoice, PICKUP_SLOTS,
 } from '@chaselaundry/shared-native';
 import Loading from '../components/Loading';
-import { getOrder, payOrder, submitReview, simulateDrive, createPaymentIntent } from '../lib/api';
+import { getOrder, payOrder, submitReview, simulateDrive, createPaymentIntent, cancelOrder, rescheduleOrder } from '../lib/api';
+
+const CANCELLABLE_STATUSES = ['placed', 'assigned', 'driver_en_route'];
 
 export default function OrderDetailSheet({ orderId, onClose }) {
   const t = useTheme();
@@ -13,9 +15,14 @@ export default function OrderDetailSheet({ orderId, onClose }) {
   const [reviewOpen, setReviewOpen] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
   const [autoDrive, setAutoDrive] = useState(true);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [rescheduling, setRescheduling] = useState(false);
+  const [newSlot, setNewSlot] = useState(null);
+  const [savingSlot, setSavingSlot] = useState(false);
 
   const reload = useCallback(() => { if (orderId) getOrder(orderId).then(setO); }, [orderId]);
-  useEffect(() => { setO(null); if (orderId) reload(); }, [orderId, reload]);
+  useEffect(() => { setO(null); setConfirmCancel(false); setRescheduling(false); if (orderId) reload(); }, [orderId, reload]);
 
   // poll for status updates while the sheet is open (native stand-in for web's socket push)
   useEffect(() => {
@@ -142,6 +149,50 @@ export default function OrderDetailSheet({ orderId, onClose }) {
           <PaymentSheet open={payOpen} onClose={() => setPayOpen(false)} amountCents={payAmount}
             title="Complete payment" description={o.code} createPaymentIntent={createPaymentIntent}
             onAuthorized={async (paymentIntentId) => { await payOrder(o.id, paymentIntentId); reload(); }} />
+
+          {CANCELLABLE_STATUSES.includes(o.status) && (
+            rescheduling ? (
+              <Card style={{ marginBottom: 10 }}>
+                <Text style={{ fontFamily: satoshi(700), fontSize: 14, marginBottom: 10 }}>Pick a new collection slot</Text>
+                {PICKUP_SLOTS.map((s) => (
+                  <Pressable key={s} onPress={() => setNewSlot(s)} style={{ paddingVertical: 12, paddingHorizontal: 12, borderRadius: 10, marginBottom: 8, borderWidth: 1.5, borderColor: newSlot === s ? t.navy : t.gray3 }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                      <Text style={{ fontFamily: satoshi(700), fontSize: 14 }}>{s}</Text>
+                      {newSlot === s && <Text>✓</Text>}
+                    </View>
+                  </Pressable>
+                ))}
+                <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
+                  <Button sm variant="ghost" onPress={() => { setRescheduling(false); setNewSlot(null); }} style={{ flex: 1 }}>Cancel</Button>
+                  <Button sm variant="lime" disabled={!newSlot || savingSlot} onPress={async () => {
+                    setSavingSlot(true);
+                    try { await rescheduleOrder(o.id, newSlot); setRescheduling(false); setNewSlot(null); await reload(); }
+                    finally { setSavingSlot(false); }
+                  }} style={{ flex: 1 }}>{savingSlot ? 'Saving…' : 'Confirm new slot'}</Button>
+                </View>
+              </Card>
+            ) : (
+              <View style={{ marginBottom: 10 }}><Button variant="ghost" onPress={() => { setRescheduling(true); setNewSlot(o.pickup_slot); }}>Reschedule pickup</Button></View>
+            )
+          )}
+
+          {CANCELLABLE_STATUSES.includes(o.status) && (
+            confirmCancel ? (
+              <Card style={{ marginBottom: 10, backgroundColor: 'rgba(239,68,68,.08)' }}>
+                <Text style={{ fontFamily: satoshi(700), fontSize: 14, marginBottom: 10 }}>Cancel this order? Any card hold will be released.</Text>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <Button sm variant="ghost" onPress={() => setConfirmCancel(false)} style={{ flex: 1 }}>No, keep it</Button>
+                  <Button sm disabled={cancelling} onPress={async () => {
+                    setCancelling(true);
+                    try { await cancelOrder(o.id); setConfirmCancel(false); await reload(); }
+                    finally { setCancelling(false); }
+                  }} style={{ flex: 1, backgroundColor: t.danger }}>{cancelling ? 'Cancelling…' : 'Yes, cancel order'}</Button>
+                </View>
+              </Card>
+            ) : (
+              <View style={{ marginBottom: 10 }}><Button variant="ghost" onPress={() => setConfirmCancel(true)}>Cancel order</Button></View>
+            )
+          )}
 
           {o.status === 'completed' && <View style={{ marginBottom: 10 }}><Button variant="ghost" onPress={() => setReviewOpen(true)}>★ Rate this order</Button></View>}
 

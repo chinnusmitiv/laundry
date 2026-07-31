@@ -298,7 +298,21 @@ export function initSchema() {
   migrateRepeatOrders();
   migrateLoadWash();
   migrateB2B();
+  migrateReferrals();
+  migratePush();
   seedOpsAdminIfMissing();
+}
+
+// Link a referral to the account it actually signed up as, once they join (idempotent).
+function migrateReferrals() {
+  const cols = db.prepare('PRAGMA table_info(referrals)').all().map((c) => c.name);
+  if (!cols.includes('referee_id')) db.exec('ALTER TABLE referrals ADD COLUMN referee_id TEXT REFERENCES users(id)');
+}
+
+// Store each user's Expo push token so notify() can send real push notifications (idempotent).
+function migratePush() {
+  const cols = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
+  if (!cols.includes('push_token')) db.exec('ALTER TABLE users ADD COLUMN push_token TEXT');
 }
 
 // Ensure a default ops admin login exists, without touching any other data

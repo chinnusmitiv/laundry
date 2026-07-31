@@ -85,13 +85,21 @@ function Orders() {
   );
 }
 
+const CANCELLABLE_STATUSES = ['placed', 'assigned', 'driver_en_route'];
+const PICKUP_SLOTS = ['Today · 18:00–20:00', 'Tomorrow · 08:00–10:00', 'Tomorrow · 18:00–20:00', 'Sat · 10:00–12:00'];
+
 function OrderDetail({ orderId }) {
   const [o, setO] = useState(null);
   const [driverLoc, setDriverLoc] = useState(null);
   const [autoDrive, setAutoDrive] = useState(true);
   const [payOpen, setPayOpen] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [rescheduling, setRescheduling] = useState(false);
+  const [newSlot, setNewSlot] = useState(null);
+  const [savingSlot, setSavingSlot] = useState(false);
   const reload = useCallback(() => api.get(`/api/orders/${orderId}`).then((x) => { setO(x); setDriverLoc(x.location); }), [orderId]);
-  useEffect(() => { reload(); }, [reload]);
+  useEffect(() => { setConfirmCancel(false); setRescheduling(false); reload(); }, [reload]);
   useSocket({
     'order:updated': (u) => { if (u.id === orderId) setO(u); },
     'driver:location': (loc) => { if (loc.order_id === orderId) setDriverLoc(loc); },
@@ -189,7 +197,44 @@ function OrderDetail({ orderId }) {
         {o.payment_status !== 'paid' && o.status !== 'cancelled' &&
           <button className="cl-btn cl-btn-lime" style={{ width: 'auto' }} onClick={() => setPayOpen(true)}>Pay {fmt.money(o.total_cents)}</button>}
         <button className="cl-btn cl-btn-ghost" style={{ width: 'auto' }} onClick={() => printInvoice(o)}>🧾 Download invoice</button>
+        {CANCELLABLE_STATUSES.includes(o.status) && !rescheduling &&
+          <button className="cl-btn cl-btn-ghost" style={{ width: 'auto' }} onClick={() => { setRescheduling(true); setNewSlot(o.pickup_slot); }}>Reschedule pickup</button>}
+        {CANCELLABLE_STATUSES.includes(o.status) && !confirmCancel &&
+          <button className="cl-btn cl-btn-ghost" style={{ width: 'auto' }} onClick={() => setConfirmCancel(true)}>Cancel order</button>}
       </div>
+
+      {CANCELLABLE_STATUSES.includes(o.status) && rescheduling && (
+        <div className="panel" style={{ marginTop: 14 }}>
+          <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 10 }}>Pick a new collection slot</div>
+          {PICKUP_SLOTS.map((s) => (
+            <div key={s} onClick={() => setNewSlot(s)} className="cl-between" style={{ padding: 12, borderRadius: 10, marginBottom: 8, cursor: 'pointer', border: newSlot === s ? '2px solid var(--navy)' : '1.5px solid var(--gray3)' }}>
+              <span style={{ fontWeight: 700 }}>{s}</span>{newSlot === s && <span>✓</span>}
+            </div>
+          ))}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="cl-btn cl-btn-ghost cl-btn-sm" style={{ width: 'auto', flex: 1 }} onClick={() => { setRescheduling(false); setNewSlot(null); }}>Cancel</button>
+            <button className="cl-btn cl-btn-lime cl-btn-sm" style={{ width: 'auto', flex: 1 }} disabled={!newSlot || savingSlot} onClick={async () => {
+              setSavingSlot(true);
+              try { await api.post(`/api/orders/${o.id}/reschedule`, { pickup_slot: newSlot }); setRescheduling(false); setNewSlot(null); await reload(); }
+              finally { setSavingSlot(false); }
+            }}>{savingSlot ? 'Saving…' : 'Confirm new slot'}</button>
+          </div>
+        </div>
+      )}
+
+      {CANCELLABLE_STATUSES.includes(o.status) && confirmCancel && (
+        <div className="panel" style={{ marginTop: 14, background: 'rgba(239,68,68,.08)' }}>
+          <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 10 }}>Cancel this order? Any card hold will be released.</div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="cl-btn cl-btn-ghost cl-btn-sm" style={{ width: 'auto', flex: 1 }} onClick={() => setConfirmCancel(false)}>No, keep it</button>
+            <button className="cl-btn cl-btn-sm" style={{ width: 'auto', flex: 1, background: 'var(--danger)', color: '#fff' }} disabled={cancelling} onClick={async () => {
+              setCancelling(true);
+              try { await api.post(`/api/orders/${o.id}/cancel`); setConfirmCancel(false); await reload(); }
+              finally { setCancelling(false); }
+            }}>{cancelling ? 'Cancelling…' : 'Yes, cancel order'}</button>
+          </div>
+        </div>
+      )}
 
       <PaymentSheet open={payOpen} onClose={() => setPayOpen(false)} amountCents={o.total_cents}
         title="Complete payment" description={o.code}

@@ -84,11 +84,24 @@ export const email = {
   },
 };
 
-// --- Push notifications ---
+// --- Push notifications — real Expo push API (no server-side dependency needed,
+// Node's built-in fetch talks to Expo's push service directly) ---
 export const push = {
-  send({ to, title, body }) {
-    log('push', `to ${to} — "${title}"`);
-    return { id: `pn_${nanoid(12)}`, delivered: true };
+  async send({ to, title, body, data }) {
+    if (!to) return { delivered: false };
+    try {
+      const res = await fetch('https://exp.host/--/api/v2/push/send', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/json' },
+        body: JSON.stringify([{ to, title, body, data, sound: 'default' }]),
+      });
+      const json = await res.json();
+      log('push', `to ${to} — "${title}" → ${JSON.stringify(json.data || json)}`);
+      return { delivered: true, ticket: json };
+    } catch (e) {
+      log('push', `failed to ${to}: ${e.message}`);
+      return { delivered: false };
+    }
   },
 };
 
@@ -128,7 +141,7 @@ export function notify({ io, userId, type, title, body, channel = 'inapp', order
 
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
   if (user?.email) email.send({ to: user.email, subject: title, body });
-  push.send({ to: user?.name || userId, title, body });
+  if (user?.push_token) push.send({ to: user.push_token, title, body, data: { orderId } });
 
   const row = { id, user_id: userId, type, title, body, channel, order_id: orderId, read: 0, created_at };
   io?.to(`user:${userId}`).emit('notification', row);

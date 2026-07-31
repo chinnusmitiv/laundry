@@ -90,11 +90,31 @@ function consumePacks(customerId, catalogId, qty) {
 // ---- query helpers ----
 const getUser = (uid) => {
   const u = db.prepare('SELECT * FROM users WHERE id = ?').get(uid);
-  if (u) delete u.password_hash; // never expose the password hash to clients
+  if (u) { delete u.password_hash; delete u.push_token; } // never expose these to clients — anyone holding a push token can spam-notify that device via Expo's public API
   return u;
 };
 const balanceOf = (uid) =>
   db.prepare('SELECT COALESCE(SUM(amount_cents),0) b FROM credits WHERE user_id = ?').get(uid).b;
+
+// grants the referral reward to both sides once the referee's FIRST order reaches
+// 'completed' — referrals sit in 'joined' (linked at signup) until this fires.
+function rewardReferralIfFirstOrder(io, customerId) {
+  const completedCount = db.prepare(`SELECT COUNT(*) c FROM orders WHERE customer_id = ? AND status = 'completed'`).get(customerId).c;
+  if (completedCount !== 1) return; // not their first completed order
+  const ref = db.prepare(`SELECT * FROM referrals WHERE referee_id = ? AND status = 'joined'`).get(customerId);
+  if (!ref) return;
+  const referrer = getUser(ref.referrer_id);
+  const referee = getUser(customerId);
+  const reason = (who) => `Referral reward — ${who} joined`;
+  db.prepare('INSERT INTO credits (id,user_id,amount_cents,type,reason,order_id,created_at) VALUES (?,?,?,?,?,?,?)')
+    .run(id('cr'), ref.referrer_id, ref.reward_cents, 'referral', reason(referee?.name || 'your friend'), null, now());
+  db.prepare('INSERT INTO credits (id,user_id,amount_cents,type,reason,order_id,created_at) VALUES (?,?,?,?,?,?,?)')
+    .run(id('cr'), customerId, ref.reward_cents, 'referral', `Referral credit — welcomed by ${referrer?.name || 'a friend'}`, null, now());
+  db.prepare(`UPDATE referrals SET status = 'rewarded' WHERE id = ?`).run(ref.id);
+  const amt = `S$${(ref.reward_cents / 100).toFixed(2)}`;
+  notify({ io, userId: ref.referrer_id, type: 'promo', title: `${amt} referral credit added`, body: `${referee?.name || 'Your friend'} completed their first order. Enjoy the credit!` });
+  notify({ io, userId: customerId, type: 'promo', title: `${amt} referral credit added`, body: `Thanks for joining via ${referrer?.name || 'a friend'}'s invite!` });
+}
 const activeSub = (uid) =>
   db.prepare(`SELECT s.*, p.name plan_name, p.discount_pct, p.free_delivery, p.included_kg, p.price_cents plan_price
               FROM subscriptions s JOIN plans p ON p.id = s.plan_id
@@ -208,6 +228,11 @@ export function registerRoutes(app, io) {
     res.json(rows.map((u) => { delete u.password_hash; return u; }));
   });
   app.get('/api/users/:id', (req, res) => res.json(getUser(req.params.id) || {}));
+  // save this device's Expo push token — generic across roles (customer/driver share the users table)
+  app.post('/api/users/:id/push-token', (req, res) => {
+    db.prepare('UPDATE users SET push_token = ? WHERE id = ?').run(req.body.token || null, req.params.id);
+    res.json({ ok: true });
+  });
   // consumer apps never pass ?scope, so they only ever see the fixed B2C catalog; ops passes scope=b2b for corporate orders
   app.get('/api/catalog', (req, res) => res.json(db.prepare('SELECT * FROM catalog WHERE scope = ? ORDER BY category, name').all(req.query.scope || 'b2c')));
 
@@ -406,7 +431,10 @@ export function registerRoutes(app, io) {
       .run(oid, code, customer_id, address_id ?? null, driver_id ?? null, facility_id ?? null, status, pickup_slot ?? null, return_slot ?? null, notes || '', handover ?? null, handover_contact ?? null,
         pricing.subtotal_cents, pricing.platform_fee_cents, pricing.delivery_fee_cents,
         pricing.discount_cents, pricing.credit_applied_cents, pricing.pack_credit_cents || 0, tipCents, pricing.total_cents + tipCents, paymentStatus, repeat_requested ? 1 : 0, repeat_requested ? (repeat_cadence || 'weekly') : null, now(), now());
-    if (driver_id) io.to(`user:${driver_id}`).emit('job:assigned', fullOrder(oid));
+    if (driver_id) {
+      notify({ io, userId: driver_id, type: 'job', title: 'New job assigned', body: `Pickup ${code} is ready for you.`, orderId: oid });
+      io.to(`user:${driver_id}`).emit('job:assigned', fullOrder(oid));
+    }
     for (const it of items) {
       const cat = db.prepare('SELECT * FROM catalog WHERE id = ?').get(it.catalog_id);
       const qty = cat?.unit === 'per_kg' ? (it.weight_kg || 0) : (it.qty || 1);
@@ -804,6 +832,37 @@ export function registerRoutes(app, io) {
     res.json(loc);
   });
 
+  // Customer self-service cancel/reschedule — deliberately narrower than the driver/ops
+  // /status endpoint above: only allowed before the driver has actually collected
+  // the order (facility hasn't touched it yet).
+  const CUSTOMER_EDITABLE_STATUSES = ['placed', 'assigned', 'driver_en_route'];
+  app.post('/api/orders/:id/cancel', (req, res) => {
+    const o = db.prepare('SELECT * FROM orders WHERE id = ?').get(req.params.id);
+    if (!o) return res.status(404).json({ error: 'not found' });
+    if (o.status === 'cancelled') return res.json({ ok: true, order: fullOrder(o.id) });
+    if (!CUSTOMER_EDITABLE_STATUSES.includes(o.status)) {
+      return res.status(409).json({ error: 'This order has already been collected — contact support to cancel it.' });
+    }
+    db.prepare('UPDATE orders SET status = ?, updated_at = ? WHERE id = ?').run('cancelled', now(), o.id);
+    settleHold(io, o, 'cancelled');
+    notify({ io, userId: o.customer_id, type: 'order', title: 'Order cancelled', body: `${o.code} has been cancelled.`, orderId: o.id });
+    res.json({ ok: true, order: broadcastOrder(io, o.id) });
+  });
+
+  // Customer self-service reschedule — same eligibility window as cancel above.
+  app.post('/api/orders/:id/reschedule', (req, res) => {
+    const o = db.prepare('SELECT * FROM orders WHERE id = ?').get(req.params.id);
+    if (!o) return res.status(404).json({ error: 'not found' });
+    if (!CUSTOMER_EDITABLE_STATUSES.includes(o.status)) {
+      return res.status(409).json({ error: 'This order has already been collected — contact support to reschedule it.' });
+    }
+    const slot = String(req.body.pickup_slot || '').trim();
+    if (!slot) return res.status(400).json({ error: 'Pick a collection slot.' });
+    db.prepare('UPDATE orders SET pickup_slot = ?, updated_at = ? WHERE id = ?').run(slot, now(), o.id);
+    notify({ io, userId: o.customer_id, type: 'order', title: 'Pickup rescheduled', body: `${o.code} pickup moved to ${slot}.`, orderId: o.id });
+    res.json({ ok: true, order: broadcastOrder(io, o.id) });
+  });
+
   // google review deep link for a delivered order (driver shows QR)
   app.get('/api/orders/:id/review-link', (req, res) => {
     const o = db.prepare('SELECT * FROM orders WHERE id = ?').get(req.params.id);
@@ -827,6 +886,7 @@ export function registerRoutes(app, io) {
     db.prepare('UPDATE orders SET status = ?, updated_at = ? WHERE id = ?').run(next, now(), o.id);
     settleHold(io, o, next); // capture the card hold on delivery success, release it on cancel
     notify({ io, userId: o.customer_id, type: 'order', title: STATUS_LABEL[next], body: `Order ${o.code}: ${STATUS_LABEL[next]}.`, orderId: o.id });
+    if (next === 'completed') rewardReferralIfFirstOrder(io, o.customer_id);
     res.json(broadcastOrder(io, o.id));
   });
 
@@ -961,6 +1021,7 @@ export function registerRoutes(app, io) {
       .run(req.body.driver_id, o.status === 'placed' ? 'assigned' : o.status, now(), o.id);
     const driver = getUser(req.body.driver_id);
     notify({ io, userId: o.customer_id, type: 'order', title: 'Driver assigned', body: `${driver?.name} will take care of ${o.code}. Steady!`, orderId: o.id });
+    notify({ io, userId: req.body.driver_id, type: 'job', title: 'New job assigned', body: `Pickup ${o.code} is ready for you.`, orderId: o.id });
     io.to(`user:${req.body.driver_id}`).emit('job:assigned', fullOrder(o.id));
     res.json(broadcastOrder(io, o.id));
   });

@@ -686,15 +686,23 @@ function Orders({ orders, onOpenOrder, onOrder }) {
 }
 
 // ─────────────────────────────────────── ORDER DETAIL (tracking)
+const CANCELLABLE_STATUSES = ['placed', 'assigned', 'driver_en_route'];
+const PICKUP_SLOTS = ['Today · 18:00–20:00', 'Tomorrow · 08:00–10:00', 'Tomorrow · 18:00–20:00'];
+
 function OrderDetail({ orderId, onClose }) {
   const [o, setO] = useState(null);
   const [driverLoc, setDriverLoc] = useState(null);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
   const [autoDrive, setAutoDrive] = useState(true);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [rescheduling, setRescheduling] = useState(false);
+  const [newSlot, setNewSlot] = useState(null);
+  const [savingSlot, setSavingSlot] = useState(false);
 
   const reload = useCallback(() => { if (orderId) api.get(`/api/orders/${orderId}`).then(setO); }, [orderId]);
-  useEffect(() => { setO(null); setDriverLoc(null); reload(); }, [orderId, reload]);
+  useEffect(() => { setO(null); setDriverLoc(null); setConfirmCancel(false); setRescheduling(false); reload(); }, [orderId, reload]);
 
   useSocket({
     'order:updated': (u) => { if (u.id === orderId) setO(u); },
@@ -805,6 +813,47 @@ function OrderDetail({ orderId, onClose }) {
         <PaymentSheet open={payOpen} onClose={() => setPayOpen(false)} amountCents={o.total_cents}
           title="Complete payment" description={o.code}
           onAuthorized={async (paymentIntentId) => { await api.post(`/api/orders/${o.id}/pay`, { payment_intent_id: paymentIntentId }); reload(); }} />
+
+        {CANCELLABLE_STATUSES.includes(o.status) && (
+          rescheduling ? (
+            <Card style={{ marginBottom: 10 }}>
+              <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 10 }}>Pick a new collection slot</div>
+              {PICKUP_SLOTS.map((s) => (
+                <div key={s} onClick={() => setNewSlot(s)} className="cl-between" style={{ padding: 12, borderRadius: 10, marginBottom: 8, cursor: 'pointer', border: newSlot === s ? '2px solid var(--navy)' : '1.5px solid var(--gray3)' }}>
+                  <span style={{ fontWeight: 700 }}>{s}</span>{newSlot === s && <span>✓</span>}
+                </div>
+              ))}
+              <div className="cl-row" style={{ gap: 8, marginTop: 4 }}>
+                <Button sm variant="ghost" style={{ flex: 1 }} onClick={() => { setRescheduling(false); setNewSlot(null); }}>Cancel</Button>
+                <Button sm variant="lime" style={{ flex: 1 }} disabled={!newSlot || savingSlot} onClick={async () => {
+                  setSavingSlot(true);
+                  try { await api.post(`/api/orders/${o.id}/reschedule`, { pickup_slot: newSlot }); setRescheduling(false); setNewSlot(null); await reload(); }
+                  finally { setSavingSlot(false); }
+                }}>{savingSlot ? 'Saving…' : 'Confirm new slot'}</Button>
+              </div>
+            </Card>
+          ) : (
+            <Button variant="ghost" style={{ marginBottom: 10 }} onClick={() => { setRescheduling(true); setNewSlot(o.pickup_slot); }}>Reschedule pickup</Button>
+          )
+        )}
+
+        {CANCELLABLE_STATUSES.includes(o.status) && (
+          confirmCancel ? (
+            <Card style={{ marginBottom: 10, background: 'rgba(239,68,68,.08)' }}>
+              <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 10 }}>Cancel this order? Any card hold will be released.</div>
+              <div className="cl-row" style={{ gap: 8 }}>
+                <Button sm variant="ghost" style={{ flex: 1 }} onClick={() => setConfirmCancel(false)}>No, keep it</Button>
+                <Button sm style={{ flex: 1, background: 'var(--danger)' }} disabled={cancelling} onClick={async () => {
+                  setCancelling(true);
+                  try { await api.post(`/api/orders/${o.id}/cancel`); setConfirmCancel(false); await reload(); }
+                  finally { setCancelling(false); }
+                }}>{cancelling ? 'Cancelling…' : 'Yes, cancel order'}</Button>
+              </div>
+            </Card>
+          ) : (
+            <Button variant="ghost" style={{ marginBottom: 10 }} onClick={() => setConfirmCancel(true)}>Cancel order</Button>
+          )
+        )}
 
         {o.status === 'completed' && <Button variant="ghost" style={{ marginBottom: 10 }} onClick={() => setReviewOpen(true)}>★ Rate this order</Button>}
 

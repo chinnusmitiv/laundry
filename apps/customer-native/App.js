@@ -4,7 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StripeProvider } from '@stripe/stripe-react-native';
 import * as SplashScreen from 'expo-splash-screen';
-import { ThemeProvider, customerTheme, useSatoshiFonts, useTheme, TopBar, Logo, BottomNav } from '@chaselaundry/shared-native';
+import { ThemeProvider, customerTheme, useSatoshiFonts, useTheme, TopBar, Logo, BottomNav, registerForPushToken } from '@chaselaundry/shared-native';
 import LoginScreen from './src/screens/LoginScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import PricesScreen from './src/screens/PricesScreen';
@@ -15,7 +15,7 @@ import SupportScreen from './src/screens/SupportScreen';
 import OrderFlowSheet from './src/screens/OrderFlowSheet';
 import OrderDetailSheet from './src/screens/OrderDetailSheet';
 import NotificationsSheet from './src/screens/NotificationsSheet';
-import { getSummary, getOrders, getNotifications } from './src/lib/api';
+import { getSummary, getOrders, getNotifications, savePushToken } from './src/lib/api';
 import { loadCustomer, clearCustomer } from './src/lib/session';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -70,6 +70,10 @@ function CustomerApp({ customer, onLogout }) {
   }, [customer.id]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    registerForPushToken().then((token) => { if (token) savePushToken(customer.id, token); });
+  }, [customer.id]);
 
   const unread = notifs.filter((n) => !n.read).length;
 

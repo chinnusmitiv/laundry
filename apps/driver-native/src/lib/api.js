@@ -37,6 +37,7 @@ export const simulateDrive = (orderId) => api.post(`/api/demo/orders/${orderId}/
 export const getReviewLink = (orderId) => api.get(`/api/orders/${orderId}/review-link`);
 export const generateTags = (orderId) => api.post(`/api/orders/${orderId}/generate-tags`);
 export const advanceByTag = (code) => api.post(`/api/garments/by-tag/${code}/advance`, { actor: 'scan' });
+export const savePushToken = (userId, token) => api.post(`/api/users/${userId}/push-token`, { token });
 
 // driver actions mapped to the next status they can set — ported 1:1 from
 // apps/driver/src/App.jsx's ACTIONS map so the label copy matches web exactly.
