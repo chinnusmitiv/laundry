@@ -26,7 +26,7 @@ export const api = {
 
 // auth
 export const requestOtp = (identifier) => api.post('/api/auth/request-otp', { identifier });
-export const verifyOtp = (identifier, code, name) => api.post('/api/auth/verify-otp', { identifier, code, name });
+export const verifyOtp = (identifier, code, name, referralCode) => api.post('/api/auth/verify-otp', { identifier, code, name, referral_code: referralCode });
 
 // catalog / plans
 export const getCatalog = () => api.get('/api/catalog');

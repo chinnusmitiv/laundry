@@ -93,6 +93,19 @@ const getUser = (uid) => {
   if (u) { delete u.password_hash; delete u.push_token; } // never expose these to clients — anyone holding a push token can spam-notify that device via Expo's public API
   return u;
 };
+
+// returns this user's stable referral code, generating + persisting one on first use
+// (a name-only code like "SUBARNA-CHASE" collides whenever two users share a first name)
+function ensureReferralCode(userId, user) {
+  if (user?.referral_code) return user.referral_code;
+  const base = String(user?.name || 'CHASE').trim().split(/\s+/)[0].toUpperCase().replace(/[^A-Z0-9]/g, '') || 'CHASE';
+  let code;
+  do {
+    code = `${base}-${randomInt(1000, 10000)}`;
+  } while (db.prepare('SELECT 1 FROM users WHERE referral_code = ?').get(code));
+  db.prepare('UPDATE users SET referral_code = ? WHERE id = ?').run(code, userId);
+  return code;
+};
 const balanceOf = (uid) =>
   db.prepare('SELECT COALESCE(SUM(amount_cents),0) b FROM credits WHERE user_id = ?').get(uid).b;
 
@@ -680,7 +693,7 @@ export function registerRoutes(app, io) {
   // referrals
   app.get('/api/customers/:id/referrals', (req, res) => {
     const u = getUser(req.params.id);
-    const code = (u?.name || 'CHASE').split(' ')[0].toUpperCase() + '-CHASE';
+    const code = ensureReferralCode(req.params.id, u);
     res.json({
       code,
       reward_cents: 500,
@@ -694,7 +707,7 @@ export function registerRoutes(app, io) {
     if (dupe) return res.status(409).json({ error: "You've already invited this email." });
 
     const u = getUser(req.params.id);
-    const code = (u?.name || 'CHASE').split(' ')[0].toUpperCase() + '-CHASE';
+    const code = ensureReferralCode(req.params.id, u);
     const r = { id: id('ref'), referrer_id: req.params.id, code, referee_email: email, status: 'sent', reward_cents: 500, created_at: now() };
     db.prepare('INSERT INTO referrals (id,referrer_id,code,referee_email,status,reward_cents,created_at) VALUES (?,?,?,?,?,?,?)')
       .run(r.id, r.referrer_id, r.code, r.referee_email, r.status, r.reward_cents, r.created_at);

@@ -9,6 +9,7 @@ export default function Login() {
   const [sent, setSent] = useState(null);
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
+  const [referralCode, setReferralCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
@@ -16,7 +17,7 @@ export default function Login() {
     setErr(''); setBusy(true);
     try {
       const res = await api.post('/api/auth/request-otp', { identifier });
-      setSent(res); setCode(''); setName(''); setStep('verify');
+      setSent(res); setCode(''); setName(''); setReferralCode(''); setStep('verify');
     } catch (e) { setErr(e.message || 'Could not send code.'); }
     finally { setBusy(false); }
   };
@@ -24,7 +25,7 @@ export default function Login() {
   const verifyOtp = async () => {
     setErr(''); setBusy(true);
     try {
-      const { user } = await api.post('/api/auth/verify-otp', { identifier, code, name });
+      const { user } = await api.post('/api/auth/verify-otp', { identifier, code, name, referral_code: referralCode });
       saveAuth(user);
       window.location.assign('/account'); // full reload so pages pick up the session
     } catch (e) { setErr(e.message || 'Could not verify code.'); setBusy(false); }
@@ -57,6 +58,8 @@ export default function Login() {
           {sent?.is_new && <>
             <label className="cl-label">Your name</label>
             <input className="cl-field" style={{ width: '100%', marginBottom: 14 }} placeholder="e.g. Alex Morgan" value={name} onChange={(e) => setName(e.target.value)} />
+            <label className="cl-label">Referral code (optional)</label>
+            <input className="cl-field" style={{ width: '100%', marginBottom: 14, textTransform: 'uppercase' }} placeholder="e.g. ALEX-1234" value={referralCode} onChange={(e) => setReferralCode(e.target.value)} />
           </>}
           <label className="cl-label">6-digit code</label>
           <input className="cl-field" inputMode="numeric" maxLength={6} placeholder="••••••"

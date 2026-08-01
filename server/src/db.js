@@ -300,6 +300,7 @@ export function initSchema() {
   migrateB2B();
   migrateReferrals();
   migratePush();
+  migrateReferralCode();
   seedOpsAdminIfMissing();
 }
 
@@ -313,6 +314,13 @@ function migrateReferrals() {
 function migratePush() {
   const cols = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
   if (!cols.includes('push_token')) db.exec('ALTER TABLE users ADD COLUMN push_token TEXT');
+}
+
+// A stable, unique-per-user referral code (previously derived on the fly from first
+// name only, so any two users sharing a first name collided on the same code) (idempotent).
+function migrateReferralCode() {
+  const cols = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
+  if (!cols.includes('referral_code')) db.exec('ALTER TABLE users ADD COLUMN referral_code TEXT');
 }
 
 // Ensure a default ops admin login exists, without touching any other data

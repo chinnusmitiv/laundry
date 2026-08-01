@@ -104,6 +104,7 @@ function AuthScreen({ onAuth }) {
   const [sent, setSent] = useState(null); // { sent_to, is_new }
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
+  const [referralCode, setReferralCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
@@ -111,7 +112,7 @@ function AuthScreen({ onAuth }) {
     setErr(''); setBusy(true);
     try {
       const res = await api.post('/api/auth/request-otp', { identifier });
-      setSent(res); setCode(''); setName(''); setStep('verify');
+      setSent(res); setCode(''); setName(''); setReferralCode(''); setStep('verify');
     } catch (e) { setErr(e.message || 'Could not send code. Try again.'); }
     finally { setBusy(false); }
   };
@@ -119,7 +120,7 @@ function AuthScreen({ onAuth }) {
   const verifyOtp = async () => {
     setErr(''); setBusy(true);
     try {
-      const { user } = await api.post('/api/auth/verify-otp', { identifier, code, name });
+      const { user } = await api.post('/api/auth/verify-otp', { identifier, code, name, referral_code: referralCode });
       onAuth(user);
     } catch (e) { setErr(e.message || 'Could not verify code. Try again.'); }
     finally { setBusy(false); }
@@ -158,7 +159,11 @@ function AuthScreen({ onAuth }) {
             </div>
 
             {sent?.is_new && (
-              <Field label="Your name" placeholder="e.g. Alex Morgan" value={name} onChange={(e) => setName(e.target.value)} />
+              <>
+                <Field label="Your name" placeholder="e.g. Alex Morgan" value={name} onChange={(e) => setName(e.target.value)} />
+                <Field label="Referral code (optional)" placeholder="e.g. ALEX-1234" value={referralCode}
+                  onChange={(e) => setReferralCode(e.target.value)} style={{ textTransform: 'uppercase' }} />
+              </>
             )}
 
             <label style={{ display: 'block', marginBottom: 14 }}>

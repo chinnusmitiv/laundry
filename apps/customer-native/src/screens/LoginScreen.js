@@ -11,6 +11,7 @@ export default function LoginScreen({ onLoggedIn }) {
   const [sent, setSent] = useState(null); // { sent_to, is_new }
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
+  const [referralCode, setReferralCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
@@ -18,7 +19,7 @@ export default function LoginScreen({ onLoggedIn }) {
     setErr(''); setBusy(true);
     try {
       const res = await requestOtp(identifier.trim());
-      setSent(res); setCode(''); setName(''); setStep('verify');
+      setSent(res); setCode(''); setName(''); setReferralCode(''); setStep('verify');
     } catch (e) { setErr(e.message || 'Could not send code. Try again.'); }
     finally { setBusy(false); }
   };
@@ -26,7 +27,7 @@ export default function LoginScreen({ onLoggedIn }) {
   const verify = async () => {
     setErr(''); setBusy(true);
     try {
-      const { user } = await verifyOtp(identifier.trim(), code, name);
+      const { user } = await verifyOtp(identifier.trim(), code, name, referralCode);
       await saveCustomer(user);
       onLoggedIn(user);
     } catch (e) { setErr(e.message || 'Could not verify code. Try again.'); }
@@ -65,7 +66,11 @@ export default function LoginScreen({ onLoggedIn }) {
               </Text>
 
               {sent?.is_new && (
-                <Field label="Your name" placeholder="e.g. Alex Morgan" value={name} onChangeText={setName} />
+                <>
+                  <Field label="Your name" placeholder="e.g. Alex Morgan" value={name} onChangeText={setName} />
+                  <Field label="Referral code (optional)" placeholder="e.g. ALEX-1234" autoCapitalize="characters"
+                    value={referralCode} onChangeText={setReferralCode} />
+                </>
               )}
 
               <View style={{ marginBottom: 14 }}>

@@ -92,7 +92,20 @@ export function registerAuthRoutes(app, io) {
       // if this email was invited via someone's referral link, join them to it now —
       // the reward itself is granted once they complete their first order (see routes.js)
       const pendingRef = db.prepare(`SELECT * FROM referrals WHERE LOWER(referee_email) = ? AND status = 'sent'`).get(c.email);
-      if (pendingRef) db.prepare(`UPDATE referrals SET status = 'joined', referee_id = ? WHERE id = ?`).run(uid, pendingRef.id);
+      if (pendingRef) {
+        db.prepare(`UPDATE referrals SET status = 'joined', referee_id = ? WHERE id = ?`).run(uid, pendingRef.id);
+      } else {
+        // no emailed invite pending — but they may have entered a friend's code directly
+        const refCode = String(req.body.referral_code || '').trim().toUpperCase();
+        if (refCode) {
+          const referrer = db.prepare(`SELECT id FROM users WHERE referral_code = ?`).get(refCode);
+          if (referrer && referrer.id !== uid) {
+            db.prepare(
+              'INSERT INTO referrals (id,referrer_id,code,referee_email,referee_id,status,reward_cents,created_at) VALUES (?,?,?,?,?,?,?,?)'
+            ).run(id('ref'), referrer.id, refCode, c.email, uid, 'joined', 500, now());
+          }
+        }
+      }
       user = db.prepare('SELECT * FROM users WHERE id = ?').get(uid);
     }
     res.json({ user: publicUser(user) });
