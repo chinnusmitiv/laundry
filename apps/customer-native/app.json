@@ -15,7 +15,8 @@
         "backgroundColor": "#1D2951",
         "foregroundImage": "./assets/android-icon-foreground.png"
       },
-      "package": "com.chaselaundry.customer"
+      "package": "com.chaselaundry.customer",
+      "googleServicesFile": "./google-services.json"
     },
     "web": {
       "favicon": "./assets/favicon.png"

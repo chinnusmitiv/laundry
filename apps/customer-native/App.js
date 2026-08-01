@@ -4,7 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StripeProvider } from '@stripe/stripe-react-native';
 import * as SplashScreen from 'expo-splash-screen';
-import { ThemeProvider, customerTheme, useSatoshiFonts, useTheme, TopBar, Logo, BottomNav, registerForPushToken } from '@chaselaundry/shared-native';
+import { ThemeProvider, customerTheme, useSatoshiFonts, useTheme, TopBar, Logo, BottomNav, registerForPushToken, reportError } from '@chaselaundry/shared-native';
 import LoginScreen from './src/screens/LoginScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import PricesScreen from './src/screens/PricesScreen';
@@ -72,7 +72,9 @@ function CustomerApp({ customer, onLogout }) {
   useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
-    registerForPushToken().then((token) => { if (token) savePushToken(customer.id, token); });
+    registerForPushToken().then((token) => {
+      if (token) savePushToken(customer.id, token).catch((e) => reportError('push-token:save', e));
+    });
   }, [customer.id]);
 
   const unread = notifs.filter((n) => !n.read).length;

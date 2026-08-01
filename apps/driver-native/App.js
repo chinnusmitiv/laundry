@@ -4,7 +4,7 @@ import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as SplashScreen from 'expo-splash-screen';
-import { ThemeProvider, navyLimeTheme, useSatoshiFonts, registerForPushToken } from '@chaselaundry/shared-native';
+import { ThemeProvider, navyLimeTheme, useSatoshiFonts, registerForPushToken, reportError } from '@chaselaundry/shared-native';
 import LoginScreen from './src/screens/LoginScreen';
 import JobsScreen from './src/screens/JobsScreen';
 import { loadDriver, clearDriver } from './src/lib/session';
@@ -30,7 +30,9 @@ export default function App() {
 
   useEffect(() => {
     if (!driver) return;
-    registerForPushToken().then((token) => { if (token) savePushToken(driver.id, token); });
+    registerForPushToken().then((token) => {
+      if (token) savePushToken(driver.id, token).catch((e) => reportError('push-token:save', e));
+    });
   }, [driver?.id]);
 
   if (!sessionReady || !fontsLoaded) return null;

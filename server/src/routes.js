@@ -233,6 +233,12 @@ export function registerRoutes(app, io) {
     db.prepare('UPDATE users SET push_token = ? WHERE id = ?').run(req.body.token || null, req.params.id);
     res.json({ ok: true });
   });
+  // temporary: relays client-side errors (e.g. push-token setup) into the server log,
+  // since a signed release APK has no attached debugger to see them otherwise
+  app.post('/api/debug/log', (req, res) => {
+    console.log(`  ⟶ [client-debug] ${req.body?.context || '?'}: ${req.body?.message || ''}`);
+    res.json({ ok: true });
+  });
   // consumer apps never pass ?scope, so they only ever see the fixed B2C catalog; ops passes scope=b2b for corporate orders
   app.get('/api/catalog', (req, res) => res.json(db.prepare('SELECT * FROM catalog WHERE scope = ? ORDER BY category, name').all(req.query.scope || 'b2c')));
 
