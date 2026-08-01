@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, KeyboardAvoidingView, Platform, ScrollView, Pressable } from 'react-native';
+import { View, Text, KeyboardAvoidingView, Platform, ScrollView, Pressable, Alert } from 'react-native';
 import { Logo, Card, Field, Button, useTheme } from '@chaselaundry/shared-native';
 import { requestOtp, verifyOtp } from '../lib/api';
 import { saveCustomer } from '../lib/session';
@@ -27,7 +27,8 @@ export default function LoginScreen({ onLoggedIn }) {
   const verify = async () => {
     setErr(''); setBusy(true);
     try {
-      const { user } = await verifyOtp(identifier.trim(), code, name, referralCode);
+      const { user, referral } = await verifyOtp(identifier.trim(), code, name, referralCode);
+      if (referral === 'invalid') Alert.alert("Referral code not recognized", "Double-check the code with your friend — your account was still created.");
       await saveCustomer(user);
       onLoggedIn(user);
     } catch (e) { setErr(e.message || 'Could not verify code. Try again.'); }

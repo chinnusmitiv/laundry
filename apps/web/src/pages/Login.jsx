@@ -25,7 +25,8 @@ export default function Login() {
   const verifyOtp = async () => {
     setErr(''); setBusy(true);
     try {
-      const { user } = await api.post('/api/auth/verify-otp', { identifier, code, name, referral_code: referralCode });
+      const { user, referral } = await api.post('/api/auth/verify-otp', { identifier, code, name, referral_code: referralCode });
+      if (referral === 'invalid') alert("Referral code not recognized — double-check it with your friend. Your account was still created.");
       saveAuth(user);
       window.location.assign('/account'); // full reload so pages pick up the session
     } catch (e) { setErr(e.message || 'Could not verify code.'); setBusy(false); }

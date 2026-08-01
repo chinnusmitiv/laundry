@@ -81,6 +81,7 @@ export function registerAuthRoutes(app, io) {
     otpStore.delete(c.email);
 
     let user = findUser(c);
+    let referralNote = null; // tells the client whether an entered referral code actually matched, since a stale/typo'd code otherwise fails completely silently
     if (!user) {
       // first time in → create the customer account
       const name = String(req.body.name || '').trim() || c.email.split('@')[0];
@@ -103,12 +104,15 @@ export function registerAuthRoutes(app, io) {
             db.prepare(
               'INSERT INTO referrals (id,referrer_id,code,referee_email,referee_id,status,reward_cents,created_at) VALUES (?,?,?,?,?,?,?,?)'
             ).run(id('ref'), referrer.id, refCode, c.email, uid, 'joined', 500, now());
+            referralNote = 'applied';
+          } else {
+            referralNote = 'invalid';
           }
         }
       }
       user = db.prepare('SELECT * FROM users WHERE id = ?').get(uid);
     }
-    res.json({ user: publicUser(user) });
+    res.json({ user: publicUser(user), referral: referralNote });
   });
 
   // ---- driver login (email + password) ----
