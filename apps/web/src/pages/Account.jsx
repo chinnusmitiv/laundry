@@ -416,11 +416,25 @@ function Wallet({ onReload }) {
   const [data, setData] = useState(null);
   const [ref, setRef] = useState(null);
   const [email, setEmail] = useState('');
+  const [inviteError, setInviteError] = useState('');
   const [topupOpen, setTopupOpen] = useState(false);
   const [payAmount, setPayAmount] = useState(0);
   const reload = () => { api.get(`/api/customers/${CUSTOMER_ID}/credits`).then(setData); api.get(`/api/customers/${CUSTOMER_ID}/referrals`).then(setRef); };
   useEffect(() => { reload(); }, []);
-  const invite = async () => { await api.post(`/api/customers/${CUSTOMER_ID}/referrals`, { email }); setEmail(''); reload(); };
+  const invite = async () => {
+    if (ref?.referrals?.some((r) => r.referee_email.toLowerCase() === email.trim().toLowerCase())) {
+      setInviteError("You've already invited this email.");
+      return;
+    }
+    try {
+      await api.post(`/api/customers/${CUSTOMER_ID}/referrals`, { email });
+      setInviteError('');
+      setEmail('');
+      reload();
+    } catch (e) {
+      setInviteError(e.message || 'Could not send the invite.');
+    }
+  };
   if (!data) return <div className="panel">Loading…</div>;
   const icon = { referral: '🎁', in_store: '💚', signup: '👋', refund: '↩️', spend: '🧾', adjustment: '⚙️', topup: '➕', bonus: '🎁' };
   return (
@@ -455,6 +469,7 @@ function Wallet({ onReload }) {
             <input className="cl-field" placeholder="friend@email.com" value={email} onChange={(e) => setEmail(e.target.value)} />
             <button className="cl-btn cl-btn-lime cl-btn-sm" disabled={!email} onClick={invite}>Invite</button>
           </div>
+          {!!inviteError && <div style={{ color: 'var(--danger)', fontSize: 12, marginTop: 8, fontWeight: 700 }}>{inviteError}</div>}
         </div>
       </div>
     </div>

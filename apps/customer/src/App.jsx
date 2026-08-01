@@ -1294,11 +1294,27 @@ function ReferralCard() {
   const [ref, setRef] = useState(null);
   const [email, setEmail] = useState('');
   const [sent, setSent] = useState(false);
+  const [error, setError] = useState('');
 
   const load = useCallback(() => api.get(`/api/customers/${CUSTOMER_ID}/referrals`).then(setRef), []);
   useEffect(() => { load(); }, [load]);
 
-  const invite = async () => { await api.post(`/api/customers/${CUSTOMER_ID}/referrals`, { email }); setSent(true); setEmail(''); load(); };
+  const invite = async () => {
+    setSent(false);
+    if (ref?.referrals?.some((r) => r.referee_email.toLowerCase() === email.trim().toLowerCase())) {
+      setError("You've already invited this email.");
+      return;
+    }
+    try {
+      await api.post(`/api/customers/${CUSTOMER_ID}/referrals`, { email });
+      setError('');
+      setSent(true);
+      setEmail('');
+      load();
+    } catch (e) {
+      setError(e.message || 'Could not send the invite.');
+    }
+  };
 
   if (!ref) return <Loading />;
   return (
@@ -1314,6 +1330,7 @@ function ReferralCard() {
         <Button sm variant="lime" disabled={!email} onClick={invite} style={{ whiteSpace: 'nowrap' }}>Invite</Button>
       </div>
       {sent && <div style={{ color: 'var(--ok)', fontSize: 12, marginTop: 8, fontWeight: 700 }}>✓ Invite sent</div>}
+      {!!error && <div style={{ color: 'var(--danger)', fontSize: 12, marginTop: 8, fontWeight: 700 }}>{error}</div>}
       {ref?.referrals?.length > 0 && <div style={{ marginTop: 12 }}>
         {ref.referrals.map((r) => <div key={r.id} className="cl-between" style={{ fontSize: 13, padding: '6px 0' }}><span className="cl-muted">{r.referee_email}</span><Chip variant={r.status === 'rewarded' ? 'navy' : 'gray'}>{r.status}</Chip></div>)}
       </div>}

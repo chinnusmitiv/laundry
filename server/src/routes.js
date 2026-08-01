@@ -688,9 +688,14 @@ export function registerRoutes(app, io) {
     });
   });
   app.post('/api/customers/:id/referrals', async (req, res) => {
+    const email = String(req.body.email || '').trim().toLowerCase();
+    if (!email) return res.status(400).json({ error: 'Enter an email address.' });
+    const dupe = db.prepare(`SELECT id FROM referrals WHERE referrer_id = ? AND LOWER(referee_email) = ?`).get(req.params.id, email);
+    if (dupe) return res.status(409).json({ error: "You've already invited this email." });
+
     const u = getUser(req.params.id);
     const code = (u?.name || 'CHASE').split(' ')[0].toUpperCase() + '-CHASE';
-    const r = { id: id('ref'), referrer_id: req.params.id, code, referee_email: req.body.email, status: 'sent', reward_cents: 500, created_at: now() };
+    const r = { id: id('ref'), referrer_id: req.params.id, code, referee_email: email, status: 'sent', reward_cents: 500, created_at: now() };
     db.prepare('INSERT INTO referrals (id,referrer_id,code,referee_email,status,reward_cents,created_at) VALUES (?,?,?,?,?,?,?)')
       .run(r.id, r.referrer_id, r.code, r.referee_email, r.status, r.reward_cents, r.created_at);
     try {

@@ -9,11 +9,26 @@ export default function ReferralCard({ customer }) {
   const [ref, setRef] = useState(null);
   const [email, setEmail] = useState('');
   const [sent, setSent] = useState(false);
+  const [error, setError] = useState('');
 
   const load = useCallback(() => getReferrals(customer.id).then(setRef), [customer.id]);
   useEffect(() => { load(); }, [load]);
 
-  const invite = async () => { await inviteReferral(customer.id, email); setSent(true); setEmail(''); load(); };
+  const alreadyInvited = (e) => ref?.referrals?.some((r) => r.referee_email.toLowerCase() === e.trim().toLowerCase());
+
+  const invite = async () => {
+    setSent(false);
+    if (alreadyInvited(email)) { setError("You've already invited this email."); return; }
+    try {
+      await inviteReferral(customer.id, email);
+      setError('');
+      setSent(true);
+      setEmail('');
+      load();
+    } catch (e) {
+      setError(e.message || 'Could not send the invite.');
+    }
+  };
 
   if (!ref) return <Loading />;
   return (
@@ -32,6 +47,7 @@ export default function ReferralCard({ customer }) {
         <Button sm variant="lime" disabled={!email} onPress={invite}>Invite</Button>
       </View>
       {sent && <Text style={{ color: t.ok, fontSize: 12, marginTop: 8, fontFamily: satoshi(700) }}>✓ Invite sent</Text>}
+      {!!error && <Text style={{ color: t.danger, fontSize: 12, marginTop: 8, fontFamily: satoshi(700) }}>{error}</Text>}
       {ref?.referrals?.length > 0 && (
         <View style={{ marginTop: 12 }}>
           {ref.referrals.map((r) => (
