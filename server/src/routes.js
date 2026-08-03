@@ -869,6 +869,14 @@ export function registerRoutes(app, io) {
     const shift = { id: id('shf'), driver_id: req.params.id, clock_in: now(), clock_out: null, start_lat: lat, start_lng: lng, status: 'active' };
     db.prepare('INSERT INTO shifts (id,driver_id,clock_in,clock_out,start_lat,start_lng,status) VALUES (?,?,?,?,?,?,?)')
       .run(shift.id, shift.driver_id, shift.clock_in, shift.clock_out, lat, lng, shift.status);
+    // also record it as a driver_locations ping — otherwise an idle on-shift driver (no
+    // active job yet) never appears on the fleet map until they start their first route
+    if (lat != null && lng != null) {
+      const loc = { id: id('loc'), driver_id: req.params.id, order_id: null, lat, lng, ts: now() };
+      db.prepare('INSERT INTO driver_locations (id,driver_id,order_id,lat,lng,ts) VALUES (?,?,?,?,?,?)')
+        .run(loc.id, loc.driver_id, loc.order_id, lat, lng, loc.ts);
+      io.to('role:ops').emit('driver:location', loc);
+    }
     io.to('role:ops').emit('driver:shift', { driver_id: req.params.id, status: 'active' });
     res.json(shift);
   });

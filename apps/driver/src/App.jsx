@@ -339,13 +339,20 @@ function ReviewQR({ open, onClose, orderId }) {
   );
 }
 
-// ── geolocation helper (falls back to a Singapore coord if denied)
+// ── geolocation helper (falls back to a Singapore coord if denied, or if the browser's
+// IP/Wi-Fi-based location — imprecise on a desktop with no real GPS — lands outside
+// Singapore entirely, which otherwise plots the driver marker in the middle of the ocean)
+const SINGAPORE_FALLBACK = { lat: 1.2931, lng: 103.8520 };
+const inSingapore = (lat, lng) => lat > 1.0 && lat < 1.6 && lng > 103.3 && lng < 104.4;
 function getPos() {
   return new Promise((resolve) => {
-    if (!navigator.geolocation) return resolve({ lat: 1.2931, lng: 103.8520 });
+    if (!navigator.geolocation) return resolve(SINGAPORE_FALLBACK);
     navigator.geolocation.getCurrentPosition(
-      (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
-      () => resolve({ lat: 1.2931, lng: 103.8520 }),
+      (p) => {
+        const { latitude: lat, longitude: lng } = p.coords;
+        resolve(inSingapore(lat, lng) ? { lat, lng } : SINGAPORE_FALLBACK);
+      },
+      () => resolve(SINGAPORE_FALLBACK),
       { timeout: 3000 }
     );
   });
