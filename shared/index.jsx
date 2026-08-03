@@ -348,6 +348,29 @@ function pinDivIcon() {
   return L.divIcon({ className: 'cl-leaflet-icon', html: '<div class="cl-pin">📍</div>', iconSize: [28, 28], iconAnchor: [14, 28] });
 }
 
+// OneMap's tile server can go down without warning (returns empty 200s instead of erroring) —
+// if not a single tile loads before the first error fires, silently swap to OSM's public tiles
+// so the map still renders, rather than leaving everyone staring at a blank grey box. An
+// isolated tile miss on an otherwise-working map (loaded=true) does NOT trigger the swap.
+function addResilientTileLayer(map) {
+  let loaded = false, switched = false;
+  const primary = L.tileLayer('https://www.onemap.gov.sg/maps/tiles/Default/{z}/{x}/{y}.png', {
+    detectRetina: true, maxZoom: 18, minZoom: 11,
+    attribution: '&copy; <a href="https://www.onemap.gov.sg/">OneMap</a> &copy; Singapore Land Authority',
+  }).addTo(map);
+  primary.on('tileload', () => { loaded = true; });
+  primary.on('tileerror', () => {
+    if (loaded || switched) return;
+    switched = true;
+    map.removeLayer(primary);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19, minZoom: 3,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    }).addTo(map);
+  });
+  return primary;
+}
+
 export function OneMap({ driver, dest, height = 220 }) {
   const el = useRef(null);
   const map = useRef(null);
@@ -357,10 +380,7 @@ export function OneMap({ driver, dest, height = 220 }) {
   useEffect(() => {
     if (!el.current || map.current) return;
     const m = L.map(el.current, { zoomControl: false, attributionControl: true }).setView([1.3521, 103.8198], 12);
-    L.tileLayer('https://www.onemap.gov.sg/maps/tiles/Default/{z}/{x}/{y}.png', {
-      detectRetina: true, maxZoom: 18, minZoom: 11,
-      attribution: '&copy; <a href="https://www.onemap.gov.sg/">OneMap</a> &copy; Singapore Land Authority',
-    }).addTo(m);
+    addResilientTileLayer(m);
     map.current = m;
     setTimeout(() => m.invalidateSize(), 150);
     return () => { m.remove(); map.current = null; dMark.current = null; destMark.current = null; };
@@ -406,10 +426,7 @@ export function FleetMap({ drivers = [], height = 420 }) {
   useEffect(() => {
     if (!el.current || map.current) return;
     const m = L.map(el.current, { zoomControl: true, attributionControl: true }).setView([1.3521, 103.8198], 12);
-    L.tileLayer('https://www.onemap.gov.sg/maps/tiles/Default/{z}/{x}/{y}.png', {
-      detectRetina: true, maxZoom: 18, minZoom: 11,
-      attribution: '&copy; <a href="https://www.onemap.gov.sg/">OneMap</a> &copy; Singapore Land Authority',
-    }).addTo(m);
+    addResilientTileLayer(m);
     map.current = m;
     setTimeout(() => m.invalidateSize(), 150);
     return () => { m.remove(); map.current = null; marks.current = {}; };
