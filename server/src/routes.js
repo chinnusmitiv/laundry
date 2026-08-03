@@ -252,8 +252,47 @@ export function registerRoutes(app, io) {
     console.log(`  ⟶ [client-debug] ${req.body?.context || '?'}: ${req.body?.message || ''}`);
     res.json({ ok: true });
   });
-  // consumer apps never pass ?scope, so they only ever see the fixed B2C catalog; ops passes scope=b2b for corporate orders
-  app.get('/api/catalog', (req, res) => res.json(db.prepare('SELECT * FROM catalog WHERE scope = ? ORDER BY category, name').all(req.query.scope || 'b2c')));
+  // consumer apps never pass ?scope, so they only ever see the fixed B2C catalog; ops passes scope=b2b
+  // for corporate orders, or scope=all to manage every item regardless of scope (catalog admin screen)
+  app.get('/api/catalog', (req, res) => {
+    const rows = req.query.scope === 'all'
+      ? db.prepare('SELECT * FROM catalog ORDER BY scope, category, grp, name').all()
+      : db.prepare('SELECT * FROM catalog WHERE scope = ? ORDER BY category, grp, name').all(req.query.scope || 'b2c');
+    res.json(rows);
+  });
+
+  // catalog management (HQ-only — pricing/turnaround is a company-wide decision, not per-warehouse)
+  app.post('/api/catalog', (req, res) => {
+    if (!isHQOps(req.body.ops_id)) return res.status(403).json({ error: 'Only HQ can manage the catalog.' });
+    const { name, category, grp, unit, price_cents, icon, eta_hours, scope } = req.body;
+    if (!name || !category || !unit || !price_cents) return res.status(400).json({ error: 'name, category, unit and price_cents are required.' });
+    const cid = id('cat');
+    db.prepare('INSERT INTO catalog (id,name,category,unit,price_cents,icon,eta_hours,scope,grp) VALUES (?,?,?,?,?,?,?,?,?)')
+      .run(cid, name, category, unit, Number(price_cents), icon || null, Number(eta_hours) || 24, scope || 'b2c', grp || null);
+    res.json(db.prepare('SELECT * FROM catalog WHERE id = ?').get(cid));
+  });
+
+  app.post('/api/catalog/:id/update', (req, res) => {
+    if (!isHQOps(req.body.ops_id)) return res.status(403).json({ error: 'Only HQ can manage the catalog.' });
+    const c = db.prepare('SELECT * FROM catalog WHERE id = ?').get(req.params.id);
+    if (!c) return res.status(404).json({ error: 'not found' });
+    const { name, category, grp, unit, price_cents, icon, eta_hours, scope } = req.body;
+    db.prepare('UPDATE catalog SET name=?, category=?, unit=?, price_cents=?, icon=?, eta_hours=?, scope=?, grp=? WHERE id=?').run(
+      name ?? c.name, category ?? c.category, unit ?? c.unit, price_cents != null ? Number(price_cents) : c.price_cents,
+      icon ?? c.icon, eta_hours != null ? Number(eta_hours) : c.eta_hours, scope ?? c.scope, grp ?? c.grp, req.params.id
+    );
+    res.json(db.prepare('SELECT * FROM catalog WHERE id = ?').get(req.params.id));
+  });
+
+  app.post('/api/catalog/:id/delete', (req, res) => {
+    if (!isHQOps(req.body.ops_id)) return res.status(403).json({ error: 'Only HQ can manage the catalog.' });
+    try {
+      db.prepare('DELETE FROM catalog WHERE id = ?').run(req.params.id);
+      res.json({ ok: true });
+    } catch {
+      res.status(409).json({ error: "Can't delete — this item is used in existing orders." });
+    }
+  });
 
   // per-client negotiated B2B rates (falls back to the b2b catalog's default price when no override exists)
   app.get('/api/ops/business/:id/rates', (req, res) => {

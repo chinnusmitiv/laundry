@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import QRCode from 'qrcode';
 import {
-  api, fmt, useSocket, getSocket, STATUS_FLOW, STATUS_LABEL, GARMENT_FLOW, GARMENT_LABEL,
+  api, fmt, useSocket, getSocket, STATUS_FLOW, STATUS_LABEL, GARMENT_FLOW, GARMENT_LABEL, CATEGORY_LABEL, etaLabel,
   Logo, Button, Chip, Field, Avatar, StatusPill, Empty, OneMap, GarmentJourney, FleetMap, PlacesAutocomplete, printInvoice, distKm,
   downloadCsv, parseCsv,
 } from '@shared';
@@ -76,6 +76,7 @@ function OpsConsole({ onLogout }) {
       { key: 'tags', label: 'Tag station', icon: '🏷️' },
       { key: 'support', label: 'Support', icon: '💬', badge: stats?.open_threads },
       { key: 'invoicing', label: 'Invoicing & Payouts', icon: '🧾' },
+      { key: 'catalog', label: 'Catalog & pricing', icon: '💲' },
       { key: 'settings', label: 'Settings', icon: '⚙️' },
     ]
     : [
@@ -116,6 +117,7 @@ function OpsConsole({ onLogout }) {
         {view === 'customers' && isHQ && <CustomersView />}
         {view === 'warehouses' && isHQ && <WarehousesView />}
         {view === 'settings' && isHQ && <RoutingSettings />}
+        {view === 'catalog' && isHQ && <CatalogAdmin opsId={scope?.opsId} />}
         {view === 'tags' && <TagStation facilityId={facilityId} isHQ={isHQ} />}
         {view === 'support' && (isHQ ? <SupportInbox opsId={scope?.opsId} /> : <FacilitySupport opsId={scope?.opsId} />)}
         {view === 'invoicing' && <InvoicingDashboard facilityId={facilityId} isHQ={isHQ} />}
@@ -1084,6 +1086,139 @@ function DriverHistoryDrawer({ driver, onClose }) {
           ))}
       </div>
     </>
+  );
+}
+
+// ───────────────────────── CATALOG & PRICING
+const CATALOG_CATEGORY_OPTIONS = ['wash_fold', 'dry_clean', 'ironing', 'bedding', 'specialty', 'linens', 'towels'];
+const CATALOG_UNIT_OPTIONS = ['per_item', 'per_kg', 'per_bag'];
+
+// HQ: manage garment types, categories, turnaround and prices — feeds the customer app's Prices & Services page directly
+function CatalogAdmin({ opsId }) {
+  const [items, setItems] = useState(null);
+  const [scopeFilter, setScopeFilter] = useState('b2c');
+  const [adding, setAdding] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [err, setErr] = useState('');
+
+  const load = useCallback(() => api.get('/api/catalog?scope=all').then(setItems), []);
+  useEffect(() => { load(); }, [load]);
+
+  const del = async (id) => {
+    if (!confirm('Delete this item? This cannot be undone.')) return;
+    try { await api.post(`/api/catalog/${id}/delete`, { ops_id: opsId }); load(); }
+    catch (e) { setErr(e.message || 'Could not delete item.'); }
+  };
+
+  if (!items) return <Empty icon="💲" title="Loading catalog…" />;
+  const filtered = items.filter((c) => c.scope === scopeFilter);
+  const byCategory = {};
+  filtered.forEach((c) => { (byCategory[c.category] = byCategory[c.category] || []).push(c); });
+
+  return (
+    <>
+      <div className="ops-h1">Catalog & pricing</div>
+      <p className="cl-muted" style={{ marginBottom: 18 }}>Manage garment types, categories, turnaround and prices shown in the customer web and mobile apps.</p>
+
+      <div className="cl-row" style={{ gap: 8, marginBottom: 16 }}>
+        <button onClick={() => setScopeFilter('b2c')} style={{ padding: '8px 16px', borderRadius: 999, fontWeight: 700, fontSize: 13, border: scopeFilter === 'b2c' ? '2px solid var(--navy)' : '1.5px solid var(--gray3)', background: scopeFilter === 'b2c' ? 'var(--navy)' : '#fff', color: scopeFilter === 'b2c' ? '#fff' : 'var(--gray)' }}>Consumer (B2C)</button>
+        <button onClick={() => setScopeFilter('b2b')} style={{ padding: '8px 16px', borderRadius: 999, fontWeight: 700, fontSize: 13, border: scopeFilter === 'b2b' ? '2px solid var(--navy)' : '1.5px solid var(--gray3)', background: scopeFilter === 'b2b' ? 'var(--navy)' : '#fff', color: scopeFilter === 'b2b' ? '#fff' : 'var(--gray)' }}>Business (B2B)</button>
+        <Button sm variant="lime" onClick={() => setAdding((x) => !x)} style={{ marginLeft: 'auto' }}>{adding ? 'Cancel' : '+ Add item'}</Button>
+      </div>
+
+      {err && <div style={{ color: 'var(--danger)', fontSize: 13, fontWeight: 700, marginBottom: 12 }}>{err}</div>}
+
+      {adding && <CatalogItemForm opsId={opsId} defaultScope={scopeFilter} onDone={() => { setAdding(false); load(); }} onCancel={() => setAdding(false)} />}
+
+      {Object.keys(byCategory).length === 0 && <Empty icon="💲" title="No items in this catalog yet" sub="Use + Add item to create one" />}
+
+      {Object.entries(byCategory).map(([cat, catItems]) => (
+        <div key={cat} className="cl-card" style={{ marginBottom: 14 }}>
+          <div className="cl-eyebrow" style={{ marginBottom: 10 }}>{CATEGORY_LABEL[cat] || cat}</div>
+          <table className="ops-table" style={{ boxShadow: 'none' }}>
+            <thead><tr><th>Name</th><th>Group</th><th>Unit</th><th>Turnaround</th><th>Price</th><th></th></tr></thead>
+            <tbody>
+              {catItems.map((c) => editingId === c.id ? (
+                <tr key={c.id}><td colSpan={6} style={{ padding: 0 }}>
+                  <CatalogItemForm opsId={opsId} item={c} onDone={() => { setEditingId(null); load(); }} onCancel={() => setEditingId(null)} inline />
+                </td></tr>
+              ) : (
+                <tr key={c.id}>
+                  <td>{c.icon ? `${c.icon} ` : ''}{c.name}</td>
+                  <td className="cl-muted">{c.grp || '—'}</td>
+                  <td className="cl-muted">{c.unit}</td>
+                  <td className="cl-muted">{etaLabel(c.eta_hours)}</td>
+                  <td>{fmt.money(c.price_cents)}</td>
+                  <td style={{ display: 'flex', gap: 8 }}>
+                    <Button sm variant="ghost" onClick={() => setEditingId(c.id)}>Edit</Button>
+                    <Button sm variant="ghost" onClick={() => del(c.id)}>Delete</Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ))}
+    </>
+  );
+}
+
+// add/edit form for a single catalog item — shared by the "+ Add item" flow and inline row editing
+function CatalogItemForm({ opsId, item, defaultScope, onDone, onCancel, inline }) {
+  const [form, setForm] = useState({
+    name: item?.name || '', category: item?.category || 'wash_fold', grp: item?.grp || '',
+    unit: item?.unit || 'per_item', price_cents: item ? (item.price_cents / 100).toFixed(2) : '',
+    eta_hours: item?.eta_hours || 48, icon: item?.icon || '', scope: item?.scope || defaultScope || 'b2c',
+  });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const set = (patch) => setForm((f) => ({ ...f, ...patch }));
+
+  const save = async () => {
+    if (!form.name.trim() || !form.price_cents) { setErr('Name and price are required.'); return; }
+    setBusy(true); setErr('');
+    const body = { ...form, ops_id: opsId, price_cents: Math.round(parseFloat(form.price_cents) * 100), eta_hours: Number(form.eta_hours) };
+    try {
+      if (item) await api.post(`/api/catalog/${item.id}/update`, body);
+      else await api.post('/api/catalog', body);
+      onDone();
+    } catch (e) { setErr(e.message || 'Could not save item.'); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="cl-card" style={{ background: 'var(--light)', marginBottom: inline ? 0 : 14 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 1fr', gap: 8, marginBottom: 8 }}>
+        <input className="cl-field" placeholder="Name (e.g. Evening Dress)" value={form.name} onChange={(e) => set({ name: e.target.value })} />
+        <input className="cl-field" placeholder="Group (e.g. Dresses)" value={form.grp} onChange={(e) => set({ grp: e.target.value })} />
+        <input className="cl-field" placeholder="Icon (emoji, optional)" value={form.icon} onChange={(e) => set({ icon: e.target.value })} />
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 8, marginBottom: 8 }}>
+        <select className="ops-select" value={form.category} onChange={(e) => set({ category: e.target.value })}>
+          {CATALOG_CATEGORY_OPTIONS.map((c) => <option key={c} value={c}>{CATEGORY_LABEL[c] || c}</option>)}
+        </select>
+        <select className="ops-select" value={form.unit} onChange={(e) => set({ unit: e.target.value })}>
+          {CATALOG_UNIT_OPTIONS.map((u) => <option key={u} value={u}>{u}</option>)}
+        </select>
+        <select className="ops-select" value={form.scope} onChange={(e) => set({ scope: e.target.value })}>
+          <option value="b2c">Consumer (B2C)</option>
+          <option value="b2b">Business (B2B)</option>
+        </select>
+        <select className="ops-select" value={form.eta_hours} onChange={(e) => set({ eta_hours: e.target.value })}>
+          <option value={4}>4h turnaround</option>
+          <option value={8}>8h turnaround</option>
+          <option value={24}>1 day service</option>
+          <option value={48}>2 day service</option>
+          <option value={72}>3 day service</option>
+        </select>
+      </div>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <input className="cl-field" style={{ maxWidth: 140 }} placeholder="Price (S$)" type="number" step="0.01" value={form.price_cents} onChange={(e) => set({ price_cents: e.target.value })} />
+        <Button sm variant="lime" disabled={busy} onClick={save}>{busy ? 'Saving…' : item ? 'Save changes' : 'Add item'}</Button>
+        <Button sm variant="ghost" onClick={onCancel}>Cancel</Button>
+      </div>
+      {err && <div style={{ color: 'var(--danger)', fontSize: 13, fontWeight: 700, marginTop: 8 }}>{err}</div>}
+    </div>
   );
 }
 
