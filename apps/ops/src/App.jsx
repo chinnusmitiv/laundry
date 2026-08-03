@@ -601,7 +601,11 @@ function OrderDrawer({ orderId, onClose, facilityId, isHQ }) {
           <div className="cl-eyebrow" style={{ marginBottom: 8 }}>Garments ({o.garments.length})</div>
           {o.garments.map((g) => <div key={g.id} className="cl-between" style={{ fontSize: 13, padding: '4px 0' }}><span>{g.type} · {g.color}</span><Chip>{GARMENT_LABEL[g.status]}</Chip></div>)}
         </div>}
-        {nextStatus && o.status !== 'cancelled' && <Button variant="lime" style={{ marginBottom: 10 }} onClick={() => setStatus(nextStatus)}>Advance → {STATUS_LABEL[nextStatus]}</Button>}
+        {nextStatus === 'confirmed'
+          ? <div className="cl-muted" style={{ fontSize: 13, marginBottom: 10, padding: '10px 12px', background: 'var(--light)', borderRadius: 10 }}>
+              Use <b>Confirm items</b> on the Facility page to verify quantities before this order can move to Cleaning.
+            </div>
+          : nextStatus && o.status !== 'cancelled' && <Button variant="lime" style={{ marginBottom: 10 }} onClick={() => setStatus(nextStatus)}>Advance → {STATUS_LABEL[nextStatus]}</Button>}
         {!['completed', 'cancelled'].includes(o.status) && <Button variant="ghost" onClick={() => setStatus('cancelled')}>Cancel order</Button>}
       </div>
     </>
@@ -1212,6 +1216,7 @@ function CatalogItemForm({ opsId, item, defaultScope, onDone, onCancel, inline }
           <option value={72}>3 day service</option>
         </select>
       </div>
+
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
         <input className="cl-field" style={{ maxWidth: 140 }} placeholder="Price (S$)" type="number" step="0.01" value={form.price_cents} onChange={(e) => set({ price_cents: e.target.value })} />
         <Button sm variant="lime" disabled={busy} onClick={save}>{busy ? 'Saving…' : item ? 'Save changes' : 'Add item'}</Button>

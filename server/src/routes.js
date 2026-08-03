@@ -941,6 +941,12 @@ export function registerRoutes(app, io) {
     if (!o) return res.status(404).json({ error: 'not found' });
     const next = req.body.status;
     if (!STATUS_FLOW.includes(next) && next !== 'cancelled') return res.status(400).json({ error: 'bad status' });
+    // 'confirmed' can only be reached via /confirm-intake (which re-counts/re-weighs and
+    // sets intake_confirmed_at) — never as a generic status bump, or the order gets stuck
+    // unable to reach 'processing' with no way to fix it short of a manual DB edit.
+    if (next === 'confirmed') {
+      return res.status(409).json({ error: 'Use "Confirm items" on the Facility page — it verifies quantities before locking the order in.' });
+    }
     // Cleaning can't start until the factory has confirmed (re-counted/re-weighed) the
     // intake — that's what locks the billable amount. No skipping straight to processing.
     if (next === 'processing' && !o.intake_confirmed_at) {
