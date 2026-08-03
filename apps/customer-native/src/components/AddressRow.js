@@ -45,7 +45,7 @@ export default function AddressRow({ customerId, a, onReload }) {
         <Text style={{ fontFamily: satoshi(700) }}>{ADDRESS_TYPES[a.type]?.icon || '📍'} {a.label}</Text>
         {a.is_default ? <Chip variant="gray">default</Chip> : null}
       </View>
-      <Text style={{ fontSize: 13, color: t.gray, marginTop: 2 }}>{a.line1}, {a.city} {a.postcode}</Text>
+      <Text style={{ fontSize: 13, color: t.gray, marginTop: 2 }}>{a.line1}{a.line2 ? `, ${a.line2}` : ''}, {a.city} {a.postcode}</Text>
       <View style={{ flexDirection: 'row', gap: 16, marginTop: 10 }}>
         {!a.is_default && <Pressable onPress={setDefault} disabled={busy}><Text style={{ fontSize: 12, fontFamily: satoshi(700), color: t.navy }}>{busy ? 'Setting…' : 'Set as default'}</Text></Pressable>}
         <Pressable onPress={() => setEditing(true)}><Text style={{ fontSize: 12, fontFamily: satoshi(700), color: t.navy }}>Edit</Text></Pressable>

@@ -338,11 +338,12 @@ function AddAddressPanel({ onSaved }) {
   const [place, setPlace] = useState(null);
   const [type, setType] = useState('home');
   const [label, setLabel] = useState('');
+  const [unit, setUnit] = useState('');
   const [busy, setBusy] = useState(false);
   const save = async () => {
     setBusy(true);
     const a = await api.post(`/api/customers/${CUSTOMER_ID}/addresses`, {
-      type, label: label.trim() || ADDRESS_TYPES[type].label, line1: place.line1, line2: '', city: 'Singapore', postcode: place.postcode, lat: place.lat, lng: place.lng, make_default: true,
+      type, label: label.trim() || ADDRESS_TYPES[type].label, line1: place.line1, line2: unit.trim(), city: 'Singapore', postcode: place.postcode, lat: place.lat, lng: place.lng, make_default: true,
     });
     setBusy(false); onSaved(a);
   };
@@ -360,6 +361,7 @@ function AddAddressPanel({ onSaved }) {
               <button key={k} onClick={() => setType(k)} style={{ flex: 1, padding: '10px 0', borderRadius: 10, fontWeight: 700, fontSize: 13, border: type === k ? '2px solid var(--navy)' : '1.5px solid var(--gray3)', background: type === k ? 'var(--navy)' : '#fff', color: type === k ? '#fff' : 'var(--gray)' }}>{t.icon} {t.label}</button>
             ))}
           </div>
+          <input className="cl-field" style={{ width: '100%', marginBottom: 12 }} placeholder="Unit / floor (e.g. #12-34)" value={unit} onChange={(e) => setUnit(e.target.value)} />
           {type === 'other' && <input className="cl-field" style={{ width: '100%', marginBottom: 12 }} placeholder="Label (e.g. Mum's place, Gym)" value={label} onChange={(e) => setLabel(e.target.value)} />}
           <Button variant="lime" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save address'}</Button>
         </>
@@ -402,7 +404,7 @@ function AddressRow({ a, onReload }) {
   return (
     <div className="panel" style={{ marginBottom: 12 }}>
       <div style={{ fontWeight: 700 }}>{ADDRESS_TYPES[a.type]?.icon || '📍'} {a.label} {a.is_default ? <Chip variant="gray">default</Chip> : null}</div>
-      <div className="cl-muted" style={{ fontSize: 13, marginTop: 4 }}>{a.line1}, {a.city} {a.postcode}</div>
+      <div className="cl-muted" style={{ fontSize: 13, marginTop: 4 }}>{a.line1}{a.line2 ? `, ${a.line2}` : ''}, {a.city} {a.postcode}</div>
       <div style={{ display: 'flex', gap: 16, marginTop: 10 }}>
         {!a.is_default && <button onClick={setDefault} disabled={busy} style={{ fontSize: 13, fontWeight: 700, color: 'var(--navy)' }}>{busy ? 'Setting…' : 'Set as default'}</button>}
         <button onClick={() => setEditing(true)} style={{ fontSize: 13, fontWeight: 700, color: 'var(--navy)' }}>Edit</button>

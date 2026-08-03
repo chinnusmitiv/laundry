@@ -6,7 +6,7 @@ import {
   Sheet, Card, Chip, StatusPill, Avatar, Button, Eyebrow, OneMap, useTheme, fmt, satoshi, GARMENT_LABEL,
 } from '@chaselaundry/shared-native';
 import {
-  getOrder, setOrderStatus, pushLocation, simulateDrive, getReviewLink, generateTags, advanceByTag, ACTIONS, HANDOVER,
+  getOrder, setOrderStatus, pushLocation, getReviewLink, generateTags, advanceByTag, ACTIONS, HANDOVER,
 } from '../lib/api';
 import { getPos } from '../lib/location';
 
@@ -39,8 +39,9 @@ export default function JobDetailSheet({ jobId, onClose }) {
   };
 
   const pingLocation = async () => {
-    const r = await simulateDrive(jobId);
-    setDriverLoc(r.location);
+    const pos = await getPos();
+    await pushLocation(job.driver_id, { ...pos, order_id: jobId });
+    setDriverLoc(pos);
   };
 
   const markComplete = async () => { setJob(await setOrderStatus(jobId, 'completed')); };

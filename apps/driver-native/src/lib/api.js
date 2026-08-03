@@ -33,7 +33,6 @@ export const getJobs = (driverId) => api.get(`/api/drivers/${driverId}/jobs`);
 export const getOrder = (orderId) => api.get(`/api/orders/${orderId}`);
 export const setOrderStatus = (orderId, status) => api.post(`/api/orders/${orderId}/status`, { status });
 export const pushLocation = (driverId, pos) => api.post(`/api/drivers/${driverId}/location`, pos);
-export const simulateDrive = (orderId) => api.post(`/api/demo/orders/${orderId}/simulate-drive`, {});
 export const getReviewLink = (orderId) => api.get(`/api/orders/${orderId}/review-link`);
 export const generateTags = (orderId) => api.post(`/api/orders/${orderId}/generate-tags`);
 export const advanceByTag = (code) => api.post(`/api/garments/by-tag/${code}/advance`, { actor: 'scan' });

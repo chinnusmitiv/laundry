@@ -384,7 +384,7 @@ function AddressPicker({ open, onClose, summary, onReload }) {
       {!adding && addresses.map((a) => (
         <Card key={a.id} onClick={() => choose(a)} style={{ marginBottom: 10, cursor: 'pointer', border: a.is_default ? '2px solid var(--navy)' : '2px solid transparent' }}>
           <div className="cl-between">
-            <div><div style={{ fontWeight: 700 }}>{ADDRESS_TYPES[a.type]?.icon || '📍'} {a.label}</div><div className="cl-muted" style={{ fontSize: 13 }}>{a.line1}, {a.postcode}</div></div>
+            <div><div style={{ fontWeight: 700 }}>{ADDRESS_TYPES[a.type]?.icon || '📍'} {a.label}</div><div className="cl-muted" style={{ fontSize: 13 }}>{a.line1}{a.line2 ? `, ${a.line2}` : ''}, {a.postcode}</div></div>
             {a.is_default ? <span>✓</span> : null}
           </div>
         </Card>
@@ -1020,7 +1020,7 @@ function OrderFlow({ open, seed, onClose, onPlaced, summary }) {
         {adding && <AddAddress customerId={summary.user.id} onSaved={onAddrSaved} onCancel={() => setAdding(false)} />}
         {addresses.map((a) => (
           <Card key={a.id} onClick={() => setAddrId(a.id)} style={{ marginBottom: 10, border: addrId === a.id ? '2px solid var(--navy)' : '2px solid transparent', cursor: 'pointer' }}>
-            <div className="cl-between"><div><div style={{ fontWeight: 700 }}>{ADDRESS_TYPES[a.type]?.icon || '📍'} {a.label}</div><div className="cl-muted" style={{ fontSize: 13 }}>{a.line1}, {a.postcode}</div></div>{addrId === a.id && <span>✓</span>}</div>
+            <div className="cl-between"><div><div style={{ fontWeight: 700 }}>{ADDRESS_TYPES[a.type]?.icon || '📍'} {a.label}</div><div className="cl-muted" style={{ fontSize: 13 }}>{a.line1}{a.line2 ? `, ${a.line2}` : ''}, {a.postcode}</div></div>{addrId === a.id && <span>✓</span>}</div>
           </Card>
         ))}
         <div className="cl-eyebrow" style={{ margin: '16px 0 8px' }}>How should we collect?</div>
@@ -1194,12 +1194,13 @@ function AddAddress({ customerId, onSaved, onCancel }) {
   const [place, setPlace] = useState(null);
   const [type, setType] = useState('home');
   const [label, setLabel] = useState('');
+  const [unit, setUnit] = useState('');
   const [saving, setSaving] = useState(false);
 
   const save = async () => {
     setSaving(true);
     const a = await api.post(`/api/customers/${customerId}/addresses`, {
-      type, label: (label.trim() || ADDRESS_TYPES[type].label), line1: place.line1, line2: '',
+      type, label: (label.trim() || ADDRESS_TYPES[type].label), line1: place.line1, line2: unit.trim(),
       city: 'Singapore', postcode: place.postcode, lat: place.lat, lng: place.lng, make_default: true,
     });
     setSaving(false); onSaved(a);
@@ -1220,6 +1221,7 @@ function AddAddress({ customerId, onSaved, onCancel }) {
             <button key={k} onClick={() => setType(k)} style={{ flex: 1, padding: '10px 0', borderRadius: 11, fontWeight: 700, fontSize: 13, border: type === k ? '2px solid var(--navy)' : '1.5px solid var(--gray3)', background: type === k ? 'var(--navy)' : '#fff', color: type === k ? '#fff' : 'var(--gray)' }}>{t.icon} {t.label}</button>
           ))}
         </div>
+        <input className="cl-field" placeholder="Unit / floor (e.g. #12-34)" value={unit} onChange={(e) => setUnit(e.target.value)} style={{ marginBottom: 12 }} />
         {type === 'other' && <input className="cl-field" placeholder="Label (e.g. Mum's place, Gym)" value={label} onChange={(e) => setLabel(e.target.value)} style={{ marginBottom: 12 }} />}
         <div className="cl-row" style={{ gap: 8 }}>
           {onCancel && <Button sm variant="ghost" onClick={onCancel} style={{ flex: 1 }}>Cancel</Button>}
@@ -1274,7 +1276,7 @@ function AddressRow({ a, onReload }) {
   return (
     <Card style={{ marginBottom: 10 }}>
       <div style={{ fontWeight: 700 }}>{ADDRESS_TYPES[a.type]?.icon || '📍'} {a.label} {a.is_default ? <Chip variant="gray">default</Chip> : null}</div>
-      <div className="cl-muted" style={{ fontSize: 13, marginTop: 2 }}>{a.line1}, {a.city} {a.postcode}</div>
+      <div className="cl-muted" style={{ fontSize: 13, marginTop: 2 }}>{a.line1}{a.line2 ? `, ${a.line2}` : ''}, {a.city} {a.postcode}</div>
       <div className="cl-row" style={{ gap: 16, marginTop: 10 }}>
         {!a.is_default && <button onClick={setDefault} disabled={busy} style={{ fontSize: 12, fontWeight: 700, color: 'var(--navy)' }}>{busy ? 'Setting…' : 'Set as default'}</button>}
         <button onClick={() => setEditing(true)} style={{ fontSize: 12, fontWeight: 700, color: 'var(--navy)' }}>Edit</button>

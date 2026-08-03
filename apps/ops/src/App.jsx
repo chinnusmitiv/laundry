@@ -557,7 +557,7 @@ function OrderDrawer({ orderId, onClose, facilityId, isHQ }) {
           <div className="cl-eyebrow" style={{ marginBottom: 8 }}>Customer</div>
           <div style={{ fontWeight: 700 }}>{o.customer?.name}</div>
           <div className="cl-muted" style={{ fontSize: 13 }}>{o.customer?.phone} · {o.customer?.email}</div>
-          <div className="cl-muted" style={{ fontSize: 13, marginTop: 6 }}>📍 {o.address?.line1}, {o.address?.postcode}</div>
+          <div className="cl-muted" style={{ fontSize: 13, marginTop: 6 }}>📍 {o.address?.line1}{o.address?.line2 ? `, ${o.address.line2}` : ''}, {o.address?.postcode}</div>
           <div style={{ marginTop: 8 }}>Driver: <b>{o.driver?.name || 'Unassigned'}</b></div>
           <div style={{ marginTop: 4 }}>Warehouse: <b>{o.facility?.name || 'Unrouted'}</b>{o.facility ? <span className="cl-muted"> · {o.facility.line1}, {o.facility.postcode}</span> : null}</div>
           {isHQ && (

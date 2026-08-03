@@ -224,11 +224,11 @@ export function parseCsv(text) {
   });
 }
 
-// order status flow shared with backend
-export const STATUS_FLOW = ['placed', 'assigned', 'driver_en_route', 'picked_up', 'at_facility', 'processing', 'ready', 'out_for_delivery', 'delivered', 'completed'];
+// order status flow shared with backend — must stay in sync with STATUS_FLOW/STATUS_LABEL in server/src/db.js
+export const STATUS_FLOW = ['placed', 'assigned', 'driver_en_route', 'picked_up', 'at_facility', 'confirmed', 'processing', 'ready', 'out_for_delivery', 'delivered', 'completed'];
 export const STATUS_LABEL = {
   placed: 'Order placed', assigned: 'Driver assigned', driver_en_route: 'Driver on the way',
-  picked_up: 'Picked up', at_facility: 'At facility', processing: 'Cleaning in progress',
+  picked_up: 'Picked up', at_facility: 'At facility', confirmed: 'Items confirmed', processing: 'Cleaning in progress',
   ready: 'Ready', out_for_delivery: 'Out for delivery', delivered: 'Delivered',
   completed: 'Completed', cancelled: 'Cancelled',
 };

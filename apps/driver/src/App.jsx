@@ -196,9 +196,9 @@ function JobDetail({ jobId, onClose }) {
   };
 
   const pingLocation = async () => {
-    // simulate stepping toward the customer (demo for live tracking)
-    const r = await api.post(`/api/demo/orders/${jobId}/simulate-drive`, {});
-    setDriverLoc(r.location);
+    const pos = await getPos();
+    await api.post(`/api/drivers/${DRIVER_ID}/location`, { ...pos, order_id: jobId });
+    setDriverLoc(pos);
   };
 
   return (

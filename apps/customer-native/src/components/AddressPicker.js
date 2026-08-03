@@ -24,7 +24,7 @@ export default function AddressPicker({ open, onClose, customer, summary, onRelo
           <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
             <View>
               <Text style={{ fontFamily: satoshi(700) }}>{ADDRESS_TYPES[a.type]?.icon || '📍'} {a.label}</Text>
-              <Text style={{ fontSize: 13, color: '#6B7280' }}>{a.line1}, {a.postcode}</Text>
+              <Text style={{ fontSize: 13, color: '#6B7280' }}>{a.line1}{a.line2 ? `, ${a.line2}` : ''}, {a.postcode}</Text>
             </View>
             {a.is_default ? <Text>✓</Text> : null}
           </View>

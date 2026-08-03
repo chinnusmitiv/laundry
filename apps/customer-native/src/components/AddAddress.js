@@ -9,12 +9,13 @@ export default function AddAddress({ customerId, onSaved, onCancel }) {
   const [place, setPlace] = useState(null);
   const [type, setType] = useState('home');
   const [label, setLabel] = useState('');
+  const [unit, setUnit] = useState('');
   const [saving, setSaving] = useState(false);
 
   const save = async () => {
     setSaving(true);
     const a = await addAddress(customerId, {
-      type, label: label.trim() || ADDRESS_TYPES[type].label, line1: place.line1, line2: '',
+      type, label: label.trim() || ADDRESS_TYPES[type].label, line1: place.line1, line2: unit.trim(),
       city: 'Singapore', postcode: place.postcode, lat: place.lat, lng: place.lng, make_default: true,
     });
     setSaving(false); onSaved(a);
@@ -41,6 +42,10 @@ export default function AddAddress({ customerId, onSaved, onCancel }) {
               </Pressable>
             ))}
           </View>
+          <TextInput
+            placeholder="Unit / floor (e.g. #12-34)" value={unit} onChangeText={setUnit}
+            style={{ borderWidth: 1.5, borderColor: t.gray3, borderRadius: 12, padding: 14, fontSize: 15, marginBottom: 12, backgroundColor: '#fff' }}
+          />
           {type === 'other' && (
             <TextInput
               placeholder="Label (e.g. Mum's place, Gym)" value={label} onChangeText={setLabel}

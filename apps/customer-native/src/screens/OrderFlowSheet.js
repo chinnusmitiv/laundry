@@ -107,7 +107,7 @@ export default function OrderFlowSheet({ open, seed, customer, summary, onClose,
               <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                 <View>
                   <Text style={{ fontFamily: satoshi(700) }}>{ADDRESS_TYPES[a.type]?.icon || '📍'} {a.label}</Text>
-                  <Text style={{ fontSize: 13, color: t.gray }}>{a.line1}, {a.postcode}</Text>
+                  <Text style={{ fontSize: 13, color: t.gray }}>{a.line1}{a.line2 ? `, ${a.line2}` : ''}, {a.postcode}</Text>
                 </View>
                 {addrId === a.id && <Text>✓</Text>}
               </View>
