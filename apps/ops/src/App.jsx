@@ -685,6 +685,8 @@ function FacilityBoard({ order, onReload }) {
   const setActualBags = async (itemId, qty) => { await api.post(`/api/order_items/${itemId}/actual-qty`, { actual_qty: qty }); onReload(); };
   const loadWashItems = (order.items || []).filter((it) => it.catalog_unit === 'per_kg');
   const bagItems = (order.items || []).filter((it) => it.catalog_unit === 'per_bag');
+  const pieceItems = (order.items || []).filter((it) => it.catalog_unit !== 'per_kg' && it.catalog_unit !== 'per_bag');
+  const quickTag = (name) => { setForm((f) => ({ ...f, type: name })); setAdding(true); };
 
   return (
     <div className="cl-card">
@@ -711,6 +713,18 @@ function FacilityBoard({ order, onReload }) {
         <div className="cl-card" style={{ background: 'var(--light)', marginBottom: 14 }}>
           <div className="cl-eyebrow" style={{ marginBottom: 10 }}>🛍️ By the bag — record bags received & cleaned</div>
           {bagItems.map((it) => <BagCountRow key={it.id} item={it} onSave={setActualBags} />)}
+        </div>
+      )}
+
+      {pieceItems.length > 0 && (
+        <div className="cl-card" style={{ background: 'var(--light)', marginBottom: 14 }}>
+          <div className="cl-eyebrow" style={{ marginBottom: 10 }}>📦 Items ordered — tag each as it's checked in</div>
+          {pieceItems.map((it) => (
+            <div key={it.id} className="cl-between" style={{ padding: '6px 0' }}>
+              <span>{it.name}{it.qty > 1 ? ` ×${it.qty}` : ''}</span>
+              <Button sm variant="ghost" onClick={() => quickTag(it.name)}>+ Tag</Button>
+            </div>
+          ))}
         </div>
       )}
 
