@@ -352,21 +352,22 @@ function pinDivIcon() {
 // if not a single tile loads before the first error fires, silently swap to OSM's public tiles
 // so the map still renders, rather than leaving everyone staring at a blank grey box. An
 // isolated tile miss on an otherwise-working map (loaded=true) does NOT trigger the swap.
+// OneMap fails intermittently per-tile (some requests 200 OK with an empty body,
+// others fine) rather than as a clean total outage — so a "swap the whole layer
+// once" strategy leaves most failing tiles blank forever the moment any single
+// tile succeeds. Instead, substitute each failing tile's image individually with
+// its OSM equivalent, tile by tile.
 function addResilientTileLayer(map) {
-  let loaded = false, switched = false;
   const primary = L.tileLayer('https://www.onemap.gov.sg/maps/tiles/Default/{z}/{x}/{y}.png', {
     detectRetina: true, maxZoom: 18, minZoom: 11,
-    attribution: '&copy; <a href="https://www.onemap.gov.sg/">OneMap</a> &copy; Singapore Land Authority',
+    attribution: '&copy; <a href="https://www.onemap.gov.sg/">OneMap</a> &copy; Singapore Land Authority | &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
   }).addTo(map);
-  primary.on('tileload', () => { loaded = true; });
-  primary.on('tileerror', () => {
-    if (loaded || switched) return;
-    switched = true;
-    map.removeLayer(primary);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19, minZoom: 3,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-    }).addTo(map);
+  primary.on('tileerror', (e) => {
+    if (e.tile.dataset.osmFallback) return;
+    e.tile.dataset.osmFallback = '1';
+    const { x, y, z } = e.coords;
+    const s = ['a', 'b', 'c'][(x + y) % 3];
+    e.tile.src = `https://${s}.tile.openstreetmap.org/${z}/${x}/${y}.png`;
   });
   return primary;
 }
