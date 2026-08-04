@@ -14,7 +14,16 @@ export default function AddressRow({ customerId, a, onReload }) {
   const remove = () => {
     Alert.alert('Delete address', `Remove "${a.label}"?`, [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: async () => { setBusy(true); await deleteAddress(customerId, a.id); setBusy(false); onReload?.(); } },
+      { text: 'Delete', style: 'destructive', onPress: async () => {
+        setBusy(true);
+        try {
+          await deleteAddress(customerId, a.id);
+          onReload?.();
+        } catch (e) {
+          Alert.alert('Could not delete address', e.message || 'Something went wrong.');
+        }
+        setBusy(false);
+      } },
     ]);
   };
 

@@ -366,8 +366,13 @@ function addResilientTileLayer(map) {
     if (e.tile.dataset.osmFallback) return;
     e.tile.dataset.osmFallback = '1';
     const { x, y, z } = e.coords;
-    const s = ['a', 'b', 'c'][(x + y) % 3];
-    e.tile.src = `https://${s}.tile.openstreetmap.org/${z}/${x}/${y}.png`;
+    // Leaflet tracks tiles across horizontally-wrapped "world copies" using an
+    // unwrapped x that can exceed [0, 2^z) — wrap it back into range before
+    // building the OSM URL, or the tile server rejects it with 400.
+    const n = 2 ** z;
+    const wx = ((x % n) + n) % n;
+    const s = ['a', 'b', 'c'][(wx + y) % 3];
+    e.tile.src = `https://${s}.tile.openstreetmap.org/${z}/${wx}/${y}.png`;
   });
   return primary;
 }

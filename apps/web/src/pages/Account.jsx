@@ -366,7 +366,14 @@ function AddressRow({ a, onReload }) {
   const save = async () => { setBusy(true); await api.post(`/api/customers/${CUSTOMER_ID}/addresses/${a.id}`, form); setBusy(false); setEditing(false); onReload(); };
   const remove = async () => {
     if (!window.confirm(`Remove "${a.label}"?`)) return;
-    setBusy(true); await api.post(`/api/customers/${CUSTOMER_ID}/addresses/${a.id}/delete`); setBusy(false); onReload();
+    setBusy(true);
+    try {
+      await api.post(`/api/customers/${CUSTOMER_ID}/addresses/${a.id}/delete`);
+      onReload();
+    } catch (e) {
+      alert(e.message || 'Could not delete this address.');
+    }
+    setBusy(false);
   };
 
   if (editing) {

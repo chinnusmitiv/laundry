@@ -1223,8 +1223,13 @@ function AddressRow({ a, onReload }) {
   const remove = async () => {
     if (!window.confirm(`Remove "${a.label}"?`)) return;
     setBusy(true);
-    await api.post(`/api/customers/${CUSTOMER_ID}/addresses/${a.id}/delete`);
-    setBusy(false); onReload?.();
+    try {
+      await api.post(`/api/customers/${CUSTOMER_ID}/addresses/${a.id}/delete`);
+      onReload?.();
+    } catch (e) {
+      alert(e.message || 'Could not delete this address.');
+    }
+    setBusy(false);
   };
 
   if (editing) {

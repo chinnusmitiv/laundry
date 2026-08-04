@@ -438,7 +438,11 @@ export function registerRoutes(app, io) {
     const { id: uid, addrId } = req.params;
     const addr = db.prepare('SELECT * FROM addresses WHERE id = ? AND user_id = ?').get(addrId, uid);
     if (!addr) return res.status(404).json({ error: 'Address not found.' });
-    db.prepare('DELETE FROM addresses WHERE id = ? AND user_id = ?').run(addrId, uid);
+    try {
+      db.prepare('DELETE FROM addresses WHERE id = ? AND user_id = ?').run(addrId, uid);
+    } catch {
+      return res.status(409).json({ error: "Can't delete — this address is used on an existing order." });
+    }
     if (addr.is_default) {
       const next = db.prepare('SELECT id FROM addresses WHERE user_id = ? LIMIT 1').get(uid);
       if (next) db.prepare('UPDATE addresses SET is_default = 1 WHERE id = ?').run(next.id);
