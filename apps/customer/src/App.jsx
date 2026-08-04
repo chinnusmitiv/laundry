@@ -214,7 +214,7 @@ function Home({ summary, orders, onOpenOrder, onOrder, onTab, onReload }) {
     <div style={{ padding: 18 }}>
       {/* address pill */}
       <button onClick={() => setAddrPickerOpen(true)} className="cl-row" style={{ gap: 8, background: '#fff', borderRadius: 999, padding: '10px 16px', boxShadow: 'var(--shadow-sm)', marginBottom: 20, maxWidth: '100%' }}>
-        <span style={{ fontSize: 15, flexShrink: 0 }}>🏠</span>
+        <span style={{ fontSize: 15, flexShrink: 0 }}>{ADDRESS_TYPES[addr?.type]?.icon || '🏠'}</span>
         <span style={{ fontWeight: 800, fontSize: 12, letterSpacing: '.3px', color: 'var(--navy)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {addr ? addr.line1.toUpperCase() : 'ADD YOUR ADDRESS'}
         </span>

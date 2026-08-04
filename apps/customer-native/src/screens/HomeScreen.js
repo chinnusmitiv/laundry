@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { ScrollView, View, Text, Pressable } from 'react-native';
-import { Card, Button, Sheet, useTheme, satoshi } from '@chaselaundry/shared-native';
+import { Card, Button, Sheet, useTheme, satoshi, ADDRESS_TYPES } from '@chaselaundry/shared-native';
 import Loading from '../components/Loading';
 import OrderRow from '../components/OrderRow';
 import AddressPicker from '../components/AddressPicker';
@@ -17,7 +17,7 @@ export default function HomeScreen({ customer, summary, orders, onOpenOrder, onO
   return (
     <ScrollView style={{ flex: 1, backgroundColor: t.light }} contentContainerStyle={{ padding: 18, paddingBottom: 30 }}>
       <Pressable onPress={() => setAddrOpen(true)} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, alignSelf: 'flex-start', backgroundColor: '#fff', borderRadius: 999, paddingVertical: 10, paddingHorizontal: 16, marginBottom: 20, ...t.shadowSm }}>
-        <Text style={{ fontSize: 15 }}>🏠</Text>
+        <Text style={{ fontSize: 15 }}>{ADDRESS_TYPES[addr?.type]?.icon || '🏠'}</Text>
         <Text numberOfLines={1} style={{ fontFamily: satoshi(800), fontSize: 12, letterSpacing: 0.3, color: t.navy, maxWidth: 200 }}>
           {addr ? addr.line1.toUpperCase() : 'ADD YOUR ADDRESS'}
         </Text>
