@@ -1148,7 +1148,7 @@ function CatalogAdmin({ opsId }) {
                 </td></tr>
               ) : (
                 <tr key={c.id}>
-                  <td>{c.icon ? `${c.icon} ` : ''}{c.name}</td>
+                  <td>{c.icon ? `${c.icon} ` : ''}{c.name}{c.bundles?.length > 0 && <span className="cl-chip cl-chip-gray" style={{ marginLeft: 8, fontSize: 11 }}>{c.bundles.length} bundle{c.bundles.length > 1 ? 's' : ''}</span>}</td>
                   <td className="cl-muted">{c.grp || '—'}</td>
                   <td className="cl-muted">{c.unit}</td>
                   <td className="cl-muted">{etaLabel(c.eta_hours)}</td>
@@ -1173,15 +1173,23 @@ function CatalogItemForm({ opsId, item, defaultScope, onDone, onCancel, inline }
     name: item?.name || '', category: item?.category || 'wash_fold', grp: item?.grp || '',
     unit: item?.unit || 'per_item', price_cents: item ? (item.price_cents / 100).toFixed(2) : '',
     eta_hours: item?.eta_hours || 48, icon: item?.icon || '', scope: item?.scope || defaultScope || 'b2c',
+    bundles: item?.bundles?.length ? item.bundles : [],
   });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const set = (patch) => setForm((f) => ({ ...f, ...patch }));
+  const addBundle = () => set({ bundles: [...form.bundles, { key: `b${Date.now()}`, name: '', desc: '', kg: 6 }] });
+  const setBundle = (i, patch) => set({ bundles: form.bundles.map((b, idx) => (idx === i ? { ...b, ...patch } : b)) });
+  const delBundle = (i) => set({ bundles: form.bundles.filter((_, idx) => idx !== i) });
+  const showBundles = form.category === 'wash_fold' && form.unit === 'per_kg';
 
   const save = async () => {
     if (!form.name.trim() || !form.price_cents) { setErr('Name and price are required.'); return; }
     setBusy(true); setErr('');
-    const body = { ...form, ops_id: opsId, price_cents: Math.round(parseFloat(form.price_cents) * 100), eta_hours: Number(form.eta_hours) };
+    const body = {
+      ...form, ops_id: opsId, price_cents: Math.round(parseFloat(form.price_cents) * 100), eta_hours: Number(form.eta_hours),
+      bundles: showBundles ? form.bundles.filter((b) => b.name.trim() && b.kg > 0) : [],
+    };
     try {
       if (item) await api.post(`/api/catalog/${item.id}/update`, body);
       else await api.post('/api/catalog', body);
@@ -1218,10 +1226,35 @@ function CatalogItemForm({ opsId, item, defaultScope, onDone, onCancel, inline }
       </div>
 
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-        <input className="cl-field" style={{ maxWidth: 140 }} placeholder="Price (S$)" type="number" step="0.01" value={form.price_cents} onChange={(e) => set({ price_cents: e.target.value })} />
-        <Button sm variant="lime" disabled={busy} onClick={save}>{busy ? 'Saving…' : item ? 'Save changes' : 'Add item'}</Button>
-        <Button sm variant="ghost" onClick={onCancel}>Cancel</Button>
+        <input className="cl-field" style={{ maxWidth: 140 }} placeholder="Price per kg (S$)" type="number" step="0.01" value={form.price_cents} onChange={(e) => set({ price_cents: e.target.value })} />
+        {!showBundles && <Button sm variant="lime" disabled={busy} onClick={save}>{busy ? 'Saving…' : item ? 'Save changes' : 'Add item'}</Button>}
+        {!showBundles && <Button sm variant="ghost" onClick={onCancel}>Cancel</Button>}
       </div>
+
+      {showBundles && (
+        <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1.5px solid var(--gray3)' }}>
+          <div className="cl-between" style={{ marginBottom: 8 }}>
+            <div>
+              <b style={{ fontSize: 14 }}>Weight bundles</b>
+              <div className="cl-muted" style={{ fontSize: 12 }}>Preset weight options shown to customers (e.g. "Mixed Wash & Fold · 6kg"). Priced at {form.price_cents || '0.00'}/kg × the bundle's weight.</div>
+            </div>
+            <Button sm variant="ghost" onClick={addBundle}>+ Add bundle</Button>
+          </div>
+          {form.bundles.length === 0 && <div className="cl-muted" style={{ fontSize: 13, marginBottom: 8 }}>No bundles yet — customers will see a plain per-kg pricelist instead.</div>}
+          {form.bundles.map((b, i) => (
+            <div key={b.key || i} style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.6fr 0.6fr auto', gap: 8, marginBottom: 8, alignItems: 'center' }}>
+              <input className="cl-field" placeholder="Name (e.g. Mixed Wash & Fold)" value={b.name} onChange={(e) => setBundle(i, { name: e.target.value })} />
+              <input className="cl-field" placeholder="Description" value={b.desc} onChange={(e) => setBundle(i, { desc: e.target.value })} />
+              <input className="cl-field" placeholder="kg" type="number" min="1" value={b.kg} onChange={(e) => setBundle(i, { kg: Number(e.target.value) || 0 })} />
+              <button onClick={() => delBundle(i)} style={{ color: 'var(--danger)', fontSize: 16 }}>✕</button>
+            </div>
+          ))}
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 }}>
+            <Button sm variant="lime" disabled={busy} onClick={save}>{busy ? 'Saving…' : item ? 'Save changes' : 'Add item'}</Button>
+            <Button sm variant="ghost" onClick={onCancel}>Cancel</Button>
+          </div>
+        </div>
+      )}
       {err && <div style={{ color: 'var(--danger)', fontSize: 13, fontWeight: 700, marginTop: 8 }}>{err}</div>}
     </div>
   );

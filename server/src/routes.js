@@ -1,7 +1,7 @@
 import { nanoid } from 'nanoid';
 import { randomInt } from 'node:crypto';
 import { db, STATUS_FLOW, STATUS_LABEL, GARMENT_FLOW } from './db.js';
-import { payments, bank, email, google, notify, stepToward, distanceKm, sendRealEmail } from './services.js';
+import { payments, bank, email, google, notify, distanceKm, sendRealEmail } from './services.js';
 import { createPaymentIntent, retrievePaymentIntent } from './stripe.js';
 import { searchPlaces, searchOneMap } from './places.js';
 import { hashPassword } from './crypto.js';
@@ -254,34 +254,39 @@ export function registerRoutes(app, io) {
   });
   // consumer apps never pass ?scope, so they only ever see the fixed B2C catalog; ops passes scope=b2b
   // for corporate orders, or scope=all to manage every item regardless of scope (catalog admin screen)
+  // Wash & Fold bundles (e.g. "Mixed 6kg") are stored as a JSON array on the per-kg
+  // catalog row — parse them out for every row that has them so clients get a plain array.
+  const withBundles = (row) => ({ ...row, bundles: row.bundles ? JSON.parse(row.bundles) : [] });
+
   app.get('/api/catalog', (req, res) => {
     const rows = req.query.scope === 'all'
       ? db.prepare('SELECT * FROM catalog ORDER BY scope, category, grp, name').all()
       : db.prepare('SELECT * FROM catalog WHERE scope = ? ORDER BY category, grp, name').all(req.query.scope || 'b2c');
-    res.json(rows);
+    res.json(rows.map(withBundles));
   });
 
   // catalog management (HQ-only — pricing/turnaround is a company-wide decision, not per-warehouse)
   app.post('/api/catalog', (req, res) => {
     if (!isHQOps(req.body.ops_id)) return res.status(403).json({ error: 'Only HQ can manage the catalog.' });
-    const { name, category, grp, unit, price_cents, icon, eta_hours, scope } = req.body;
+    const { name, category, grp, unit, price_cents, icon, eta_hours, scope, bundles } = req.body;
     if (!name || !category || !unit || !price_cents) return res.status(400).json({ error: 'name, category, unit and price_cents are required.' });
     const cid = id('cat');
-    db.prepare('INSERT INTO catalog (id,name,category,unit,price_cents,icon,eta_hours,scope,grp) VALUES (?,?,?,?,?,?,?,?,?)')
-      .run(cid, name, category, unit, Number(price_cents), icon || null, Number(eta_hours) || 24, scope || 'b2c', grp || null);
-    res.json(db.prepare('SELECT * FROM catalog WHERE id = ?').get(cid));
+    db.prepare('INSERT INTO catalog (id,name,category,unit,price_cents,icon,eta_hours,scope,grp,bundles) VALUES (?,?,?,?,?,?,?,?,?,?)')
+      .run(cid, name, category, unit, Number(price_cents), icon || null, Number(eta_hours) || 24, scope || 'b2c', grp || null, Array.isArray(bundles) ? JSON.stringify(bundles) : null);
+    res.json(withBundles(db.prepare('SELECT * FROM catalog WHERE id = ?').get(cid)));
   });
 
   app.post('/api/catalog/:id/update', (req, res) => {
     if (!isHQOps(req.body.ops_id)) return res.status(403).json({ error: 'Only HQ can manage the catalog.' });
     const c = db.prepare('SELECT * FROM catalog WHERE id = ?').get(req.params.id);
     if (!c) return res.status(404).json({ error: 'not found' });
-    const { name, category, grp, unit, price_cents, icon, eta_hours, scope } = req.body;
-    db.prepare('UPDATE catalog SET name=?, category=?, unit=?, price_cents=?, icon=?, eta_hours=?, scope=?, grp=? WHERE id=?').run(
+    const { name, category, grp, unit, price_cents, icon, eta_hours, scope, bundles } = req.body;
+    db.prepare('UPDATE catalog SET name=?, category=?, unit=?, price_cents=?, icon=?, eta_hours=?, scope=?, grp=?, bundles=? WHERE id=?').run(
       name ?? c.name, category ?? c.category, unit ?? c.unit, price_cents != null ? Number(price_cents) : c.price_cents,
-      icon ?? c.icon, eta_hours != null ? Number(eta_hours) : c.eta_hours, scope ?? c.scope, grp ?? c.grp, req.params.id
+      icon ?? c.icon, eta_hours != null ? Number(eta_hours) : c.eta_hours, scope ?? c.scope, grp ?? c.grp,
+      Array.isArray(bundles) ? JSON.stringify(bundles) : c.bundles, req.params.id
     );
-    res.json(db.prepare('SELECT * FROM catalog WHERE id = ?').get(req.params.id));
+    res.json(withBundles(db.prepare('SELECT * FROM catalog WHERE id = ?').get(req.params.id)));
   });
 
   app.post('/api/catalog/:id/delete', (req, res) => {
@@ -425,6 +430,19 @@ export function registerRoutes(app, io) {
     const { id: uid, addrId } = req.params;
     db.prepare('UPDATE addresses SET is_default = 0 WHERE user_id = ?').run(uid);
     db.prepare('UPDATE addresses SET is_default = 1 WHERE id = ? AND user_id = ?').run(addrId, uid);
+    res.json(db.prepare('SELECT * FROM addresses WHERE user_id = ?').all(uid));
+  });
+
+  // remove a saved address
+  app.post('/api/customers/:id/addresses/:addrId/delete', (req, res) => {
+    const { id: uid, addrId } = req.params;
+    const addr = db.prepare('SELECT * FROM addresses WHERE id = ? AND user_id = ?').get(addrId, uid);
+    if (!addr) return res.status(404).json({ error: 'Address not found.' });
+    db.prepare('DELETE FROM addresses WHERE id = ? AND user_id = ?').run(addrId, uid);
+    if (addr.is_default) {
+      const next = db.prepare('SELECT id FROM addresses WHERE user_id = ? LIMIT 1').get(uid);
+      if (next) db.prepare('UPDATE addresses SET is_default = 1 WHERE id = ?').run(next.id);
+    }
     res.json(db.prepare('SELECT * FROM addresses WHERE user_id = ?').all(uid));
   });
 
@@ -1605,56 +1623,6 @@ export function registerRoutes(app, io) {
     res.json({ ok: true });
   });
 
-  // ===========================================================
-  // DEMO HELPER: simulate driver driving toward a customer
-  // (steps the driver location toward the order address & advances status)
-  // ===========================================================
-  app.post('/api/demo/orders/:id/simulate-drive', (req, res) => {
-    const o = fullOrder(req.params.id);
-    if (!o || !o.driver_id || !o.address) return res.status(400).json({ error: 'need driver + address' });
-    const last = o.location || { lat: 1.3521, lng: 103.8198 };
-    const next = stepToward({ lat: last.lat, lng: last.lng }, { lat: o.address.lat, lng: o.address.lng }, 0.25);
-    db.prepare('INSERT INTO driver_locations (id,driver_id,order_id,lat,lng,ts) VALUES (?,?,?,?,?,?)')
-      .run(id('loc'), o.driver_id, o.id, next.lat, next.lng, now());
-    const km = distanceKm(next, { lat: o.address.lat, lng: o.address.lng });
-    io.to(`order:${o.id}`).emit('driver:location', { ...next, driver_id: o.driver_id, order_id: o.id, eta_km: km });
-    io.to('role:ops').emit('driver:location', { ...next, driver_id: o.driver_id, order_id: o.id });
-    res.json({ location: next, eta_km: km });
-  });
-
-  // spin up a demo order already out-for-delivery with a driver ~3km away,
-  // so customer/web/ops can immediately watch live tracking
-  app.post('/api/demo/customers/:id/spawn-tracking', (req, res) => {
-    const uid = req.params.id;
-    if (!getUser(uid)) return res.status(404).json({ error: 'no such customer' });
-    let addr = db.prepare('SELECT * FROM addresses WHERE user_id = ? ORDER BY is_default DESC LIMIT 1').get(uid);
-    if (!addr) {
-      const aid = id('adr');
-      db.prepare('INSERT INTO addresses (id,user_id,label,type,line1,line2,city,postcode,lat,lng,is_default) VALUES (?,?,?,?,?,?,?,?,?,?,1)')
-        .run(aid, uid, 'Home', 'home', '78 Tiong Bahru Road', '#12-04', 'Singapore', '168732', 1.2847, 103.8270);
-      addr = db.prepare('SELECT * FROM addresses WHERE id = ?').get(aid);
-    }
-    const driver = db.prepare("SELECT * FROM users WHERE role = 'driver' ORDER BY name LIMIT 1").get();
-    const fac = db.prepare('SELECT * FROM facilities WHERE active = 1 LIMIT 1').get();
-    const cat = db.prepare('SELECT * FROM catalog LIMIT 1').get();
-    const oid = id('ord');
-    const code = `CL-${1000 + db.prepare('SELECT COUNT(*) c FROM orders').get().c + 50}`;
-    db.prepare(`INSERT INTO orders (id,code,customer_id,address_id,driver_id,facility_id,status,pickup_slot,return_slot,notes,handover,handover_contact,
-        subtotal_cents,platform_fee_cents,delivery_fee_cents,discount_cents,credit_applied_cents,total_cents,payment_status,created_at,updated_at)
-      VALUES (?,?,?,?,?,?, 'out_for_delivery', ?,?,?,?,?, ?,?,?,?,?,?, 'paid', ?, ?)`)
-      .run(oid, code, uid, addr.id, driver?.id ?? null, fac?.id ?? null, 'Today · 18:00–20:00', 'Today · 20:00–22:00', 'Demo live-tracking order', 'leave_at_door', null,
-        1400, 99, 0, 0, 0, 1499, now(), now());
-    db.prepare('INSERT INTO order_items (id,order_id,catalog_id,name,qty,weight_kg,price_cents) VALUES (?,?,?,?,?,?,?)')
-      .run(id('itm'), oid, cat?.id ?? null, cat?.name || 'Wash & Fold', 1, 4, 1400);
-    if (driver) {
-      const start = { lat: addr.lat + 0.025, lng: addr.lng + 0.02 }; // ~3km away
-      db.prepare('INSERT INTO driver_locations (id,driver_id,order_id,lat,lng,ts) VALUES (?,?,?,?,?,?)')
-        .run(id('loc'), driver.id, oid, start.lat, start.lng, now());
-    }
-    const full = fullOrder(oid);
-    io.to('role:ops').emit('order:new', full);
-    res.json(full);
-  });
 }
 
 // ---- pricing engine ----

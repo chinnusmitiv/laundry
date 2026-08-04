@@ -5,7 +5,7 @@ import {
   useTheme, satoshi, fmt, STATUS_FLOW, STATUS_LABEL, HANDOVER, GARMENT_LABEL, distKm, etaMins, downloadInvoice, PICKUP_SLOTS,
 } from '@chaselaundry/shared-native';
 import Loading from '../components/Loading';
-import { getOrder, payOrder, submitReview, simulateDrive, createPaymentIntent, cancelOrder, rescheduleOrder } from '../lib/api';
+import { getOrder, payOrder, submitReview, createPaymentIntent, cancelOrder, rescheduleOrder } from '../lib/api';
 
 const CANCELLABLE_STATUSES = ['placed', 'assigned', 'driver_en_route'];
 
@@ -14,7 +14,6 @@ export default function OrderDetailSheet({ orderId, onClose }) {
   const [o, setO] = useState(null);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
-  const [autoDrive, setAutoDrive] = useState(true);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [rescheduling, setRescheduling] = useState(false);
@@ -33,18 +32,10 @@ export default function OrderDetailSheet({ orderId, onClose }) {
 
   const enRoute = o && ['driver_en_route', 'out_for_delivery'].includes(o.status) && o.address;
 
-  // live tracking demo: auto-advance the driver toward the address while en route
-  useEffect(() => {
-    if (!orderId || !autoDrive || !enRoute) return;
-    const iv = setInterval(() => { simulateDrive(orderId).then((r) => setO((cur) => (cur ? { ...cur, location: r.location } : cur))).catch(() => {}); }, 2500);
-    return () => clearInterval(iv);
-  }, [orderId, autoDrive, enRoute]);
-
   if (!orderId) return null;
   const driver = o?.location;
   const km = driver?.lat && o?.address?.lat ? distKm(driver, o.address) : null;
   const etaMin = etaMins(km);
-  const simulate = () => simulateDrive(orderId).then((r) => setO((cur) => (cur ? { ...cur, location: r.location } : cur)));
   // matches server's /api/orders/:id/pay: an authorized hold settles for the held
   // amount (which can drift from the order's current total after an edit), everything
   // else charges the order's current total.
@@ -72,10 +63,6 @@ export default function OrderDetailSheet({ orderId, onClose }) {
                   <Text style={{ color: t.gray, fontSize: 13 }}>{km != null ? `· ${km.toFixed(1)} km away` : '· on the way'}</Text>
                 </View>
                 {etaMin != null && <Text style={{ fontFamily: satoshi(900), fontSize: 14 }}>~{etaMin} min</Text>}
-              </View>
-              <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
-                <Button sm variant="ghost" onPress={() => setAutoDrive((a) => !a)} style={{ flex: 1 }}>{autoDrive ? '⏸ Pause live' : '▶ Resume live'}</Button>
-                <Button sm variant="ghost" onPress={simulate} style={{ flex: 1 }}>Advance ›</Button>
               </View>
             </View>
           )}

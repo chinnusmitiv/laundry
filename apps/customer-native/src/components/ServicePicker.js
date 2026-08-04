@@ -63,16 +63,18 @@ export default function ServicePicker({ catalog, cart, setCart, initialCat, onAs
   );
 }
 
+// falls back to Mixed 6kg / Separate 12kg if HQ hasn't configured any bundles yet
+const DEFAULT_BUNDLES = [
+  { key: 'mixed', name: 'Mixed Wash & Fold', desc: 'All colours washed together.', kg: 6 },
+  { key: 'separate', name: 'Separate Wash & Fold', desc: 'Lights and darks washed separately.', kg: 12 },
+];
 function WashFoldPricelist({ items, cart, setItem }) {
   const t = useTheme();
   const base = items.find((c) => /fold/i.test(c.name)) || items[0];
   const perKg = base.price_cents;
-  const BUNDLES = [
-    { key: 'mixed', name: 'Mixed Wash & Fold', desc: 'All colours washed together.', kg: 6 },
-    { key: 'separate', name: 'Separate Wash & Fold', desc: 'Lights and darks washed separately.', kg: 12 },
-  ];
+  const BUNDLES = base.bundles?.length ? base.bundles : DEFAULT_BUNDLES;
   const cur = cart[base.id]?.weight || 0;
-  const activeKg = cur >= 12 ? 12 : cur >= 6 ? 6 : 0;
+  const activeKg = [...BUNDLES].map((b) => b.kg).sort((a, b) => b - a).find((kg) => cur >= kg) || 0;
   const extra = Math.max(0, cur - activeKg);
 
   const pick = (kg) => setItem(base.id, { weight: kg });
@@ -112,7 +114,7 @@ function WashFoldPricelist({ items, cart, setItem }) {
       </Card>
 
       <Card style={{ marginBottom: 12, backgroundColor: t.light }}>
-        <Text style={{ fontFamily: satoshi(800), fontSize: 14, marginBottom: 8 }}>See what 6kg looks like</Text>
+        <Text style={{ fontFamily: satoshi(800), fontSize: 14, marginBottom: 8 }}>See what {Math.min(...BUNDLES.map((b) => b.kg))}kg looks like</Text>
         <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>
           {['12 shirts', '3 trousers', '7 underwear', '7 pairs of socks'].map((tx) => <Chip key={tx} variant="gray">{tx}</Chip>)}
         </View>

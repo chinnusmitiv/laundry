@@ -4,7 +4,6 @@ import { Card, Button, Sheet, useTheme, satoshi } from '@chaselaundry/shared-nat
 import Loading from '../components/Loading';
 import OrderRow from '../components/OrderRow';
 import AddressPicker from '../components/AddressPicker';
-import { spawnTracking } from '../lib/api';
 
 export default function HomeScreen({ customer, summary, orders, onOpenOrder, onOrder, onTab, onReload }) {
   const t = useTheme();
@@ -60,17 +59,6 @@ export default function HomeScreen({ customer, summary, orders, onOpenOrder, onO
           {active.map((o) => <OrderRow key={o.id} o={o} onPress={() => onOpenOrder(o.id)} />)}
         </View>
       )}
-
-      <Card onPress={async () => { const o = await spawnTracking(customer.id); onOpenOrder(o.id); }}
-        style={{ marginBottom: 14, borderWidth: 1.5, borderColor: t.navy, borderStyle: 'dashed' }}>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-          <View style={{ flex: 1 }}>
-            <Text style={{ fontFamily: satoshi(900) }}>🚗 Track a live driver</Text>
-            <Text style={{ fontSize: 12, color: t.gray, marginTop: 2 }}>Demo: spawn an out-for-delivery order & watch it move</Text>
-          </View>
-          <Text style={{ fontSize: 22 }}>→</Text>
-        </View>
-      </Card>
 
       <Card style={{ marginBottom: 14, backgroundColor: t.accentPale }} onPress={() => setHowOpen(true)}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 12 }}>

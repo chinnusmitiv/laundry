@@ -34,8 +34,6 @@ export default function OrderFlowSheet({ open, seed, customer, summary, onClose,
   const [plans, setPlans] = useState([]);
   const [upsellPlan, setUpsellPlan] = useState(null);
   const [payPlan, setPayPlan] = useState(null);
-  const [promoCode, setPromoCode] = useState('');
-  const [promoMsg, setPromoMsg] = useState('');
   const [skipItemStep, setSkipItemStep] = useState(false);
 
   useEffect(() => {
@@ -43,7 +41,7 @@ export default function OrderFlowSheet({ open, seed, customer, summary, onClose,
       getCatalog().then(setCatalog); getPlans().then(setPlans);
       setStep(seed?.step || 1); setCart(seed?.cart || {}); setSkipItemStep(!!(seed?.cart && Object.keys(seed.cart).length));
       setAdding(false); setNotes(''); setHandover('hand_to_me'); setHandoverContact(''); setRepeat(false); setRepeatCadence('weekly');
-      setTipCents(0); setChargesInfoOpen(false); setUpsellPlan(null); setPayPlan(null); setPromoCode(''); setPromoMsg('');
+      setTipCents(0); setChargesInfoOpen(false); setUpsellPlan(null); setPayPlan(null);
       const addrs = summary?.addresses || [];
       setAddresses(addrs); setAddrId((addrs.find((a) => a.is_default) || addrs[0])?.id || null);
     }
@@ -192,18 +190,6 @@ export default function OrderFlowSheet({ open, seed, customer, summary, onClose,
               )}
               <View style={{ height: 1, backgroundColor: t.gray3, marginVertical: 14 }} />
               <Line l="Held now · charged on delivery" v={fmt.money(quote.total_cents + tipCents)} bold />
-            </Card>
-
-            <Card style={{ marginBottom: 14 }}>
-              <View style={{ flexDirection: 'row', gap: 8 }}>
-                <TextInput
-                  placeholder="Enter gift card or code" value={promoCode}
-                  onChangeText={(v) => { setPromoCode(v); setPromoMsg(''); }}
-                  style={{ flex: 1, borderWidth: 1.5, borderColor: t.gray3, borderRadius: 12, padding: 14, fontSize: 15 }}
-                />
-                <Button sm variant="ghost" disabled={!promoCode.trim()} onPress={() => setPromoMsg('No active promotions right now')}>Apply</Button>
-              </View>
-              {!!promoMsg && <Text style={{ color: t.gray, fontSize: 12, marginTop: 8 }}>{promoMsg}</Text>}
             </Card>
 
             <Card style={{ marginBottom: 14 }} onPress={() => setUseCredit((x) => !x)}>

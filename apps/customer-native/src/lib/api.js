@@ -39,6 +39,7 @@ export const updateProfile = (customerId, patch) => api.post(`/api/customers/${c
 export const addAddress = (customerId, address) => api.post(`/api/customers/${customerId}/addresses`, address);
 export const updateAddress = (customerId, addrId, patch) => api.post(`/api/customers/${customerId}/addresses/${addrId}`, patch);
 export const setDefaultAddress = (customerId, addrId) => api.post(`/api/customers/${customerId}/addresses/${addrId}/default`);
+export const deleteAddress = (customerId, addrId) => api.post(`/api/customers/${customerId}/addresses/${addrId}/delete`);
 
 // orders
 export const getOrders = (customerId) => api.get(`/api/customers/${customerId}/orders`);
@@ -74,5 +75,3 @@ export const getThread = (threadId) => api.get(`/api/threads/${threadId}`);
 export const sendThreadMessage = (threadId, payload) => api.post(`/api/threads/${threadId}/messages`, payload);
 
 // demo / live tracking
-export const spawnTracking = (customerId) => api.post(`/api/demo/customers/${customerId}/spawn-tracking`);
-export const simulateDrive = (orderId) => api.post(`/api/demo/orders/${orderId}/simulate-drive`, {});

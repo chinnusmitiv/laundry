@@ -10,6 +10,16 @@ import {
 } from '../lib/api';
 import { getPos } from '../lib/location';
 
+// Prefer the real street address over raw lat/lng — Maps reverse-geocodes a bare
+// coordinate to whichever indexed place happens to be nearest (a shop, a random
+// unit), which can read as "wrong location" even though the coordinate is fine.
+function mapsDest(place) {
+  if (!place) return null;
+  const text = [place.line1, place.postcode ? `Singapore ${place.postcode}` : null].filter(Boolean).join(', ');
+  if (text) return encodeURIComponent(text);
+  return place.lat ? `${place.lat},${place.lng}` : null;
+}
+
 export default function JobDetailSheet({ jobId, onClose }) {
   const t = useTheme();
   const [job, setJob] = useState(null);
@@ -81,7 +91,7 @@ export default function JobDetailSheet({ jobId, onClose }) {
             )}
             <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
               <Button sm variant="ghost" style={{ flex: 1 }} onPress={() => job.customer?.phone && Linking.openURL(`tel:${job.customer.phone}`)}>📞 Call</Button>
-              <Button sm variant="ghost" style={{ flex: 1 }} onPress={() => job.address?.lat && Linking.openURL(`https://maps.google.com/?q=${job.address.lat},${job.address.lng}`)}>🧭 Navigate</Button>
+              <Button sm variant="ghost" style={{ flex: 1 }} disabled={!mapsDest(job.address)} onPress={() => { const d = mapsDest(job.address); if (d) Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${d}&travelmode=driving`); }}>🧭 Navigate</Button>
             </View>
             {!!job.notes && <Text style={{ marginTop: 12, fontSize: 13, fontStyle: 'italic', color: t.gray }}>“{job.notes}”</Text>}
           </Card>
@@ -107,7 +117,7 @@ export default function JobDetailSheet({ jobId, onClose }) {
                   </Text>
                   <Text style={{ fontSize: 13, color: 'rgba(255,255,255,.6)', marginTop: 2 }}>{job.facility.line1}, {job.facility.postcode}</Text>
                 </View>
-                <Button sm variant="lime" onPress={() => Linking.openURL(`https://maps.google.com/?q=${job.facility.lat},${job.facility.lng}`)}>🧭 Navigate</Button>
+                <Button sm variant="lime" disabled={!mapsDest(job.facility)} onPress={() => { const d = mapsDest(job.facility); if (d) Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${d}&travelmode=driving`); }}>🧭 Navigate</Button>
               </View>
             </Card>
           )}

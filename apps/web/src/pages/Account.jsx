@@ -71,8 +71,6 @@ function Orders() {
         {sel ? <OrderDetail orderId={sel} /> : <div className="panel"><Empty icon="📦" title="No orders yet" /></div>}
       </div>
       <div>
-        <button className="cl-btn cl-btn-ghost cl-btn-sm" style={{ marginBottom: 12, width: 'auto', border: '1.5px dashed var(--navy)' }}
-          onClick={async () => { const o = await api.post(`/api/demo/customers/${CUSTOMER_ID}/spawn-tracking`); load(); setSel(o.id); }}>🚗 Demo: track a live driver</button>
         <div className="cl-eyebrow" style={{ marginBottom: 10 }}>Your orders</div>
         {orders.map((o) => (
           <div key={o.id} className="panel" onClick={() => setSel(o.id)} style={{ marginBottom: 10, cursor: 'pointer', padding: 16, border: sel === o.id ? '2px solid var(--navy)' : '2px solid transparent' }}>
@@ -91,7 +89,6 @@ const PICKUP_SLOTS = ['Today · 18:00–20:00', 'Tomorrow · 08:00–10:00', 'To
 function OrderDetail({ orderId }) {
   const [o, setO] = useState(null);
   const [driverLoc, setDriverLoc] = useState(null);
-  const [autoDrive, setAutoDrive] = useState(true);
   const [payOpen, setPayOpen] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [cancelling, setCancelling] = useState(false);
@@ -107,13 +104,7 @@ function OrderDetail({ orderId }) {
   }, { userId: CUSTOMER_ID }, [orderId]);
   useEffect(() => { getSocket().emit('watch:order', orderId); return () => getSocket().emit('unwatch:order', orderId); }, [orderId]);
 
-  // live tracking: auto-advance driver toward the address while en route
   const enRoute = o && ['driver_en_route', 'out_for_delivery'].includes(o.status) && o.address;
-  useEffect(() => {
-    if (!enRoute || !autoDrive) return;
-    const t = setInterval(() => { api.post(`/api/demo/orders/${orderId}/simulate-drive`, {}).catch(() => {}); }, 2500);
-    return () => clearInterval(t);
-  }, [enRoute, autoDrive, orderId]);
 
   if (!o) return <div className="panel">Loading…</div>;
   const showMap = enRoute;
@@ -138,10 +129,6 @@ function OrderDetail({ orderId }) {
             <span className="cl-muted">{km != null ? `· ${km.toFixed(1)} km away` : '· on the way'}</span>
           </span>
           {eta != null && <span style={{ fontWeight: 900, fontSize: 15 }}>~{eta} min away</span>}
-        </div>
-        <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-          <button className="cl-btn cl-btn-ghost cl-btn-sm" style={{ width: 'auto' }} onClick={() => setAutoDrive((a) => !a)}>{autoDrive ? '⏸ Pause live' : '▶ Resume live'}</button>
-          <button className="cl-btn cl-btn-ghost cl-btn-sm" style={{ width: 'auto' }} onClick={() => api.post(`/api/demo/orders/${orderId}/simulate-drive`, {})}>Advance ›</button>
         </div>
         <style>{`@keyframes clLive{0%{box-shadow:0 0 0 0 rgba(22,163,74,.5)}70%{box-shadow:0 0 0 8px rgba(22,163,74,0)}100%{box-shadow:0 0 0 0 rgba(22,163,74,0)}}`}</style>
       </div>}
@@ -377,6 +364,10 @@ function AddressRow({ a, onReload }) {
 
   const setDefault = async () => { setBusy(true); await api.post(`/api/customers/${CUSTOMER_ID}/addresses/${a.id}/default`); setBusy(false); onReload(); };
   const save = async () => { setBusy(true); await api.post(`/api/customers/${CUSTOMER_ID}/addresses/${a.id}`, form); setBusy(false); setEditing(false); onReload(); };
+  const remove = async () => {
+    if (!window.confirm(`Remove "${a.label}"?`)) return;
+    setBusy(true); await api.post(`/api/customers/${CUSTOMER_ID}/addresses/${a.id}/delete`); setBusy(false); onReload();
+  };
 
   if (editing) {
     return (
@@ -408,6 +399,7 @@ function AddressRow({ a, onReload }) {
       <div style={{ display: 'flex', gap: 16, marginTop: 10 }}>
         {!a.is_default && <button onClick={setDefault} disabled={busy} style={{ fontSize: 13, fontWeight: 700, color: 'var(--navy)' }}>{busy ? 'Setting…' : 'Set as default'}</button>}
         <button onClick={() => setEditing(true)} style={{ fontSize: 13, fontWeight: 700, color: 'var(--navy)' }}>Edit</button>
+        <button onClick={remove} disabled={busy} style={{ fontSize: 13, fontWeight: 700, color: '#d33' }}>Delete</button>
       </div>
     </div>
   );

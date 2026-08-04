@@ -301,6 +301,7 @@ export function initSchema() {
   migrateReferrals();
   migratePush();
   migrateReferralCode();
+  migrateCatalogBundles();
   seedOpsAdminIfMissing();
 }
 
@@ -321,6 +322,14 @@ function migratePush() {
 function migrateReferralCode() {
   const cols = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
   if (!cols.includes('referral_code')) db.exec('ALTER TABLE users ADD COLUMN referral_code TEXT');
+}
+
+// Admin-configurable Wash & Fold weight bundles (e.g. "Mixed 6kg", "Separate 12kg"),
+// stored as a JSON array on the per-kg catalog row so HQ can price/name/resize them
+// without a code change (idempotent).
+function migrateCatalogBundles() {
+  const cols = db.prepare('PRAGMA table_info(catalog)').all().map((c) => c.name);
+  if (!cols.includes('bundles')) db.exec('ALTER TABLE catalog ADD COLUMN bundles TEXT');
 }
 
 // Ensure a default ops admin login exists, without touching any other data

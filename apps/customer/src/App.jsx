@@ -260,15 +260,6 @@ function Home({ summary, orders, onOpenOrder, onOrder, onTab, onReload }) {
         </div>
       )}
 
-      {/* demo: spawn a live-tracking order */}
-      <Card onClick={async () => { const o = await api.post(`/api/demo/customers/${CUSTOMER_ID}/spawn-tracking`); onOpenOrder(o.id); }}
-        style={{ marginBottom: 14, border: '1.5px dashed var(--navy)', cursor: 'pointer' }}>
-        <div className="cl-between">
-          <div><div style={{ fontWeight: 900 }}>🚗 Track a live driver</div><div className="cl-muted" style={{ fontSize: 12, marginTop: 2 }}>Demo: spawn an out-for-delivery order & watch it move</div></div>
-          <span style={{ fontSize: 22 }}>→</span>
-        </div>
-      </Card>
-
       {/* getting started */}
       <Card style={{ marginBottom: 14, background: 'var(--lime-pale)' }} onClick={() => setHowOpen(true)}>
         <div className="cl-between" style={{ gap: 12 }}>
@@ -527,16 +518,18 @@ function Prices({ onSchedule, onTab }) {
   );
 }
 
-// Wash & Fold — weight-based bundles (Mixed 6kg / Separate 12kg) + additional kg.
+// Wash & Fold — admin-configured weight bundles (falls back to Mixed 6kg / Separate 12kg
+// if HQ hasn't set any up yet) + additional kg.
+const DEFAULT_BUNDLES = [
+  { key: 'mixed', name: 'Mixed Wash & Fold', desc: 'All colours washed together.', kg: 6 },
+  { key: 'separate', name: 'Separate Wash & Fold', desc: 'Lights and darks washed separately.', kg: 12 },
+];
 function WashFoldPricelist({ items, cart, setItem, setCart }) {
   const base = items.find((c) => /fold/i.test(c.name)) || items[0]; // "Wash & Fold" per-kg rate
   const perKg = base.price_cents;
-  const BUNDLES = [
-    { key: 'mixed', name: 'Mixed Wash & Fold', desc: 'All colours washed together.', kg: 6 },
-    { key: 'separate', name: 'Separate Wash & Fold', desc: 'Lights and darks washed separately.', kg: 12 },
-  ];
+  const BUNDLES = base.bundles?.length ? base.bundles : DEFAULT_BUNDLES;
   const cur = cart[base.id]?.weight || 0;
-  const activeKg = cur >= 12 ? 12 : cur >= 6 ? 6 : 0;
+  const activeKg = [...BUNDLES].map((b) => b.kg).sort((a, b) => b - a).find((kg) => cur >= kg) || 0;
   const extra = Math.max(0, cur - activeKg);
 
   const pick = (kg) => setItem(base.id, { weight: kg });
@@ -577,9 +570,9 @@ function WashFoldPricelist({ items, cart, setItem, setCart }) {
         ) : null}
       </Card>
 
-      {/* what 6kg looks like */}
+      {/* what the smallest bundle looks like */}
       <Card style={{ marginBottom: 12, background: 'var(--light)' }}>
-        <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 8 }}>See what 6kg looks like</div>
+        <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 8 }}>See what {Math.min(...BUNDLES.map((b) => b.kg))}kg looks like</div>
         <div className="cl-row" style={{ gap: 6, flexWrap: 'wrap' }}>
           {['12 shirts', '3 trousers', '7 underwear', '7 pairs of socks'].map((t) => <Chip key={t} variant="gray">{t}</Chip>)}
         </div>
@@ -700,7 +693,6 @@ function OrderDetail({ orderId, onClose }) {
   const [driverLoc, setDriverLoc] = useState(null);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
-  const [autoDrive, setAutoDrive] = useState(true);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [rescheduling, setRescheduling] = useState(false);
@@ -717,21 +709,13 @@ function OrderDetail({ orderId, onClose }) {
 
   useEffect(() => { if (orderId) getSocket().emit('watch:order', orderId); }, [orderId]);
 
-  // live tracking: auto-advance the driver toward the address while en route
   const enRoute = o && ['driver_en_route', 'out_for_delivery'].includes(o.status) && o.address;
-  useEffect(() => {
-    if (!orderId || !autoDrive || !enRoute) return;
-    const t = setInterval(() => { api.post(`/api/demo/orders/${orderId}/simulate-drive`, {}).catch(() => {}); }, 2500);
-    return () => clearInterval(t);
-  }, [orderId, autoDrive, enRoute]);
 
   if (!orderId) return null;
   const showMap = enRoute;
   const driver = driverLoc || o?.location;
   const km = driver?.lat && o?.address?.lat ? distKm(driver, o.address) : null;
   const etaMin = km != null ? Math.max(1, Math.round(km * 3)) : null;
-
-  const simulate = async () => { await api.post(`/api/demo/orders/${orderId}/simulate-drive`, {}); };
 
   return (
     <Sheet open={!!orderId} onClose={onClose} title={o ? `${o.code}` : 'Loading…'}>
@@ -750,10 +734,6 @@ function OrderDetail({ orderId, onClose }) {
               <span className="cl-muted">{km != null ? `· ${km.toFixed(1)} km away` : '· on the way'}</span>
             </span>
             {etaMin != null && <span style={{ fontWeight: 900, fontSize: 14 }}>~{etaMin} min</span>}
-          </div>
-          <div className="cl-row" style={{ gap: 8, marginTop: 10 }}>
-            <Button sm variant="ghost" onClick={() => setAutoDrive((a) => !a)} style={{ flex: 1 }}>{autoDrive ? '⏸ Pause live' : '▶ Resume live'}</Button>
-            <Button sm variant="ghost" onClick={simulate} style={{ flex: 1 }}>Advance ›</Button>
           </div>
           <style>{`@keyframes clLive{0%{box-shadow:0 0 0 0 rgba(22,163,74,.5)}70%{box-shadow:0 0 0 8px rgba(22,163,74,0)}100%{box-shadow:0 0 0 0 rgba(22,163,74,0)}}`}</style>
         </div>}
@@ -952,15 +932,13 @@ function OrderFlow({ open, seed, onClose, onPlaced, summary }) {
   const [plans, setPlans] = useState([]);
   const [upsellPlan, setUpsellPlan] = useState(null);
   const [payPlan, setPayPlan] = useState(null); // paid plan awaiting card auth, chosen at checkout
-  const [promoCode, setPromoCode] = useState('');
-  const [promoMsg, setPromoMsg] = useState('');
   const [skipItemStep, setSkipItemStep] = useState(false); // true when items were already chosen (e.g. from the Prices tab)
 
   useEffect(() => {
     if (open && !wasOpen.current) {
       api.get('/api/catalog').then(setCatalog); api.get('/api/plans').then(setPlans);
       setStep(seed?.step || 1); setCart(seed?.cart || {}); setSkipItemStep(!!(seed?.cart && Object.keys(seed.cart).length)); setNoteOpen({}); setAdding(false); setNotes(''); setHandover('hand_to_me'); setHandoverContact(''); setRepeat(false); setRepeatCadence('weekly');
-      setTipCents(0); setChargesInfoOpen(false); setUpsellPlan(null); setPayPlan(null); setPromoCode(''); setPromoMsg('');
+      setTipCents(0); setChargesInfoOpen(false); setUpsellPlan(null); setPayPlan(null);
       const addrs = summary?.addresses || [];
       setAddresses(addrs); setAddrId((addrs.find((a) => a.is_default) || addrs[0])?.id || null);
     }
@@ -1086,14 +1064,6 @@ function OrderFlow({ open, seed, onClose, onPlaced, summary }) {
             )}
             <div className="cl-divider" />
             <Line l={<b>Held now · charged on delivery</b>} v={<b>{fmt.money(quote.total_cents + tipCents)}</b>} />
-          </Card>
-
-          <Card style={{ marginBottom: 14 }}>
-            <div className="cl-row" style={{ gap: 8 }}>
-              <input className="cl-field" placeholder="Enter gift card or code" value={promoCode} onChange={(e) => { setPromoCode(e.target.value); setPromoMsg(''); }} style={{ flex: 1 }} />
-              <Button sm variant="ghost" disabled={!promoCode.trim()} onClick={() => setPromoMsg('No active promotions right now')}>Apply</Button>
-            </div>
-            {promoMsg && <div className="cl-muted" style={{ fontSize: 12, marginTop: 8 }}>{promoMsg}</div>}
           </Card>
 
           <Card style={{ marginBottom: 14 }} onClick={() => setUseCredit((x) => !x)}>
@@ -1250,6 +1220,13 @@ function AddressRow({ a, onReload }) {
     setBusy(false); setEditing(false); onReload?.();
   };
 
+  const remove = async () => {
+    if (!window.confirm(`Remove "${a.label}"?`)) return;
+    setBusy(true);
+    await api.post(`/api/customers/${CUSTOMER_ID}/addresses/${a.id}/delete`);
+    setBusy(false); onReload?.();
+  };
+
   if (editing) {
     return (
       <Card style={{ marginBottom: 10, background: 'var(--light)' }}>
@@ -1280,6 +1257,7 @@ function AddressRow({ a, onReload }) {
       <div className="cl-row" style={{ gap: 16, marginTop: 10 }}>
         {!a.is_default && <button onClick={setDefault} disabled={busy} style={{ fontSize: 12, fontWeight: 700, color: 'var(--navy)' }}>{busy ? 'Setting…' : 'Set as default'}</button>}
         <button onClick={() => setEditing(true)} style={{ fontSize: 12, fontWeight: 700, color: 'var(--navy)' }}>Edit</button>
+        <button onClick={remove} disabled={busy} style={{ fontSize: 12, fontWeight: 700, color: '#d33' }}>Delete</button>
       </div>
     </Card>
   );

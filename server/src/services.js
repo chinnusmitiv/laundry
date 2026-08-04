@@ -114,15 +114,6 @@ export const google = {
   },
 };
 
-// --- Geo: simulate a driver moving toward a destination ---
-// Returns the next lat/lng stepping a fraction toward the target.
-export function stepToward({ lat, lng }, { lat: tLat, lng: tLng }, fraction = 0.18) {
-  return {
-    lat: lat + (tLat - lat) * fraction,
-    lng: lng + (tLng - lng) * fraction,
-  };
-}
-
 export function distanceKm(a, b) {
   const R = 6371;
   const dLat = ((b.lat - a.lat) * Math.PI) / 180;

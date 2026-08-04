@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, Pressable } from 'react-native';
+import { View, Text, TextInput, Pressable, Alert } from 'react-native';
 import { Card, Chip, Button, ADDRESS_TYPES, useTheme, satoshi } from '@chaselaundry/shared-native';
-import { setDefaultAddress, updateAddress } from '../lib/api';
+import { setDefaultAddress, updateAddress, deleteAddress } from '../lib/api';
 
 export default function AddressRow({ customerId, a, onReload }) {
   const t = useTheme();
@@ -11,6 +11,12 @@ export default function AddressRow({ customerId, a, onReload }) {
 
   const setDefault = async () => { setBusy(true); await setDefaultAddress(customerId, a.id); setBusy(false); onReload?.(); };
   const save = async () => { setBusy(true); await updateAddress(customerId, a.id, form); setBusy(false); setEditing(false); onReload?.(); };
+  const remove = () => {
+    Alert.alert('Delete address', `Remove "${a.label}"?`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: async () => { setBusy(true); await deleteAddress(customerId, a.id); setBusy(false); onReload?.(); } },
+    ]);
+  };
 
   const fieldStyle = { borderWidth: 1.5, borderColor: t.gray3, borderRadius: 12, padding: 14, fontSize: 15, marginBottom: 10, backgroundColor: '#fff' };
 
@@ -49,6 +55,7 @@ export default function AddressRow({ customerId, a, onReload }) {
       <View style={{ flexDirection: 'row', gap: 16, marginTop: 10 }}>
         {!a.is_default && <Pressable onPress={setDefault} disabled={busy}><Text style={{ fontSize: 12, fontFamily: satoshi(700), color: t.navy }}>{busy ? 'Setting…' : 'Set as default'}</Text></Pressable>}
         <Pressable onPress={() => setEditing(true)}><Text style={{ fontSize: 12, fontFamily: satoshi(700), color: t.navy }}>Edit</Text></Pressable>
+        <Pressable onPress={remove} disabled={busy}><Text style={{ fontSize: 12, fontFamily: satoshi(700), color: t.danger || '#d33' }}>Delete</Text></Pressable>
       </View>
     </Card>
   );

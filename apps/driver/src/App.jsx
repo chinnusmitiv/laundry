@@ -172,6 +172,16 @@ function JobRow({ job, onClick }) {
 }
 
 // ── job detail: customer info, map, status actions, location ping, QR review
+// Prefer the real street address over raw lat/lng — Maps reverse-geocodes a bare
+// coordinate to whichever indexed place happens to be nearest (a shop, a random
+// unit), which can read as "wrong location" even though the coordinate is fine.
+function mapsDest(place) {
+  if (!place) return null;
+  const text = [place.line1, place.postcode ? `Singapore ${place.postcode}` : null].filter(Boolean).join(', ');
+  if (text) return encodeURIComponent(text);
+  return place.lat ? `${place.lat},${place.lng}` : null;
+}
+
 function JobDetail({ jobId, onClose }) {
   const [job, setJob] = useState(null);
   const [driverLoc, setDriverLoc] = useState(null);
@@ -229,7 +239,7 @@ function JobDetail({ jobId, onClose }) {
           )}
           <div className="cl-row" style={{ gap: 8, marginTop: 12 }}>
             <Button sm variant="ghost" onClick={() => window.open(`tel:${job.customer?.phone}`)} style={{ flex: 1 }}>📞 Call</Button>
-            <Button sm variant="ghost" onClick={() => window.open(`https://maps.google.com/?q=${job.address?.lat},${job.address?.lng}`)} style={{ flex: 1 }}>🧭 Navigate</Button>
+            <Button sm variant="ghost" disabled={!mapsDest(job.address)} onClick={() => { const d = mapsDest(job.address); if (d) window.open(`https://www.google.com/maps/dir/?api=1&destination=${d}&travelmode=driving`); }} style={{ flex: 1 }}>🧭 Navigate</Button>
           </div>
           {job.notes && <div style={{ marginTop: 12, fontSize: 13, fontStyle: 'italic', color: 'var(--gray)' }}>“{job.notes}”</div>}
         </Card>
@@ -250,7 +260,7 @@ function JobDetail({ jobId, onClose }) {
               <div style={{ fontWeight: 800, fontSize: 15 }}>🏭 {job.facility.name} <span style={{ color: 'var(--lime)', fontSize: 12 }}>{job.facility.code}</span></div>
               <div style={{ fontSize: 13, color: 'rgba(255,255,255,.6)', marginTop: 2 }}>{job.facility.line1}, {job.facility.postcode}</div>
             </div>
-            <Button sm variant="lime" onClick={() => window.open(`https://maps.google.com/?q=${job.facility.lat},${job.facility.lng}`)}>🧭 Navigate</Button>
+            <Button sm variant="lime" disabled={!mapsDest(job.facility)} onClick={() => { const d = mapsDest(job.facility); if (d) window.open(`https://www.google.com/maps/dir/?api=1&destination=${d}&travelmode=driving`); }}>🧭 Navigate</Button>
           </div>
         </Card>}
 

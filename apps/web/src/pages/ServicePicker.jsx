@@ -61,17 +61,19 @@ export default function WebServicePicker({ catalog, cart, setCart, initialCat })
   );
 }
 
-// Wash & Fold — weight bundles (Mixed 6kg / Separate 12kg) + additional kg.
+// Wash & Fold — admin-configured weight bundles (falls back to Mixed 6kg / Separate 12kg
+// if HQ hasn't set any up yet) + additional kg.
+const DEFAULT_BUNDLES = [
+  { key: 'mixed', name: 'Mixed Wash & Fold', desc: 'All colours washed together.', kg: 6 },
+  { key: 'separate', name: 'Separate Wash & Fold', desc: 'Lights and darks washed separately.', kg: 12 },
+];
 function WashFoldBundles({ items, cart, setItem }) {
   const base = items.find((c) => /fold/i.test(c.name)) || items[0];
   if (!base) return null;
   const perKg = base.price_cents;
-  const BUNDLES = [
-    { key: 'mixed', name: 'Mixed Wash & Fold', desc: 'All colours washed together.', kg: 6 },
-    { key: 'separate', name: 'Separate Wash & Fold', desc: 'Lights and darks washed separately.', kg: 12 },
-  ];
+  const BUNDLES = base.bundles?.length ? base.bundles : DEFAULT_BUNDLES;
   const cur = cart[base.id]?.weight || 0;
-  const activeKg = cur >= 12 ? 12 : cur >= 6 ? 6 : 0;
+  const activeKg = [...BUNDLES].map((b) => b.kg).sort((a, b) => b - a).find((kg) => cur >= kg) || 0;
   const extra = Math.max(0, cur - activeKg);
   const pick = (kg) => setItem(base.id, { weight: kg });
   const setExtra = (n) => activeKg && setItem(base.id, { weight: activeKg + Math.max(0, n) });
@@ -111,7 +113,7 @@ function WashFoldBundles({ items, cart, setItem }) {
       </div>
 
       <div className="panel" style={{ background: 'var(--light)' }}>
-        <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 10 }}>See what 6kg looks like</div>
+        <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 10 }}>See what {Math.min(...BUNDLES.map((b) => b.kg))}kg looks like</div>
         <div className="cl-row" style={{ gap: 8, flexWrap: 'wrap' }}>
           {['12 shirts', '3 trousers', '7 underwear', '7 pairs of socks'].map((t) => <Chip key={t} variant="gray">{t}</Chip>)}
         </div>
