@@ -1,7 +1,7 @@
 import { nanoid } from 'nanoid';
 import { randomInt } from 'node:crypto';
 import { db, STATUS_FLOW, STATUS_LABEL, GARMENT_FLOW } from './db.js';
-import { payments, bank, email, google, notify, distanceKm, sendRealEmail } from './services.js';
+import { payments, bank, email, google, notify, distanceKm, sendRealEmail, referralEmail } from './services.js';
 import { createPaymentIntent, retrievePaymentIntent } from './stripe.js';
 import { searchPlaces, searchOneMap } from './places.js';
 import { hashPassword } from './crypto.js';
@@ -773,11 +773,7 @@ export function registerRoutes(app, io) {
     db.prepare('INSERT INTO referrals (id,referrer_id,code,referee_email,status,reward_cents,created_at) VALUES (?,?,?,?,?,?,?)')
       .run(r.id, r.referrer_id, r.code, r.referee_email, r.status, r.reward_cents, r.created_at);
     try {
-      await sendRealEmail({
-        to: r.referee_email,
-        subject: `${u?.name || 'A friend'} invited you to ChaseLaundry — get S$5 credit`,
-        body: `${u?.name || 'A friend'} thinks you'll love ChaseLaundry and wants to give you S$5.00 credit on your first order.\n\nUse referral code ${code} when you sign up — you'll both get S$5.00 once you place your first order.`,
-      });
+      await sendRealEmail({ to: r.referee_email, ...referralEmail({ inviterName: u?.name, code }) });
     } catch (e) {
       console.warn(`⚠️  Referral invite email to ${r.referee_email} not sent (${e.message})`);
     }

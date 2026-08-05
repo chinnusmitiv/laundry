@@ -2,7 +2,7 @@ import { nanoid } from 'nanoid';
 import { randomInt } from 'node:crypto';
 import { db } from './db.js';
 import { verifyPassword } from './crypto.js';
-import { sendRealEmail } from './services.js';
+import { sendRealEmail, otpEmail } from './services.js';
 
 const now = () => new Date().toISOString();
 const id = (p) => `${p}_${nanoid(8)}`;
@@ -52,7 +52,7 @@ export function registerAuthRoutes(app, io) {
     otpStore.set(c.email, { code, expiresAt: Date.now() + OTP_TTL_MS, attempts: 0 });
 
     try {
-      await sendRealEmail({ to: c.email, subject: 'Your ChaseLaundry login code', body: `Your one-time login code is ${code}. It expires in 5 minutes.` });
+      await sendRealEmail({ to: c.email, ...otpEmail(code) });
     } catch (e) {
       console.warn(`⚠️  OTP email to ${c.email} not sent (${e.message}) — code for local testing: ${code}`);
     }

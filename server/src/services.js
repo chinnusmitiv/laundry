@@ -23,11 +23,79 @@ if (!mailer) {
   console.warn('⚠️  GMAIL_USER / GMAIL_APP_PASSWORD not set — login OTP emails will fail to send. See server/.env.example.');
 }
 
-// send a real email — used only for login OTP codes, not general notifications
-export async function sendRealEmail({ to, subject, body }) {
+// send a real email — used only for login OTP codes and referral invites, not general notifications
+export async function sendRealEmail({ to, subject, body, html }) {
   if (!mailer) throw new Error('Email is not configured on the server (missing GMAIL_USER / GMAIL_APP_PASSWORD).');
-  await mailer.sendMail({ from: `ChaseLaundry <${gmailUser}>`, to, subject, text: body });
+  await mailer.sendMail({ from: `ChaseLaundry <${gmailUser}>`, to, subject, text: body, ...(html ? { html } : {}) });
   log('email', `to ${to} — "${subject}" → sent (real)`);
+}
+
+// ── branded HTML email templates (login OTP + referral invite) ──
+// Table-based layout with inline styles only, and an inline-SVG logo mark (no
+// externally-hosted image) so the brand renders identically across clients
+// without depending on image-blocking settings or a public asset URL.
+const NAVY = '#1D2951', LIME = '#C7FF33', LIME_D = '#A8D400', GRAY = '#6B7280';
+
+function logoMarkSvg(size, stroke) {
+  return `<svg width="${size}" height="${size}" viewBox="0 0 100 100" fill="none" style="display:block">
+    <path d="M 82.34 62.51 A 34 34 0 1 1 68.02 23.17" stroke="${stroke}" stroke-width="11" stroke-linecap="round" fill="none" />
+    <circle cx="82.78" cy="32.00" r="6.0" fill="${LIME}" />
+  </svg>`;
+}
+
+function emailShell(innerHtml) {
+  return `<!doctype html><html><body style="margin:0;padding:0;background:#F4F5F8;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F4F5F8;padding:32px 16px;">
+      <tr><td align="center">
+        <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="max-width:480px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;">
+          <tr><td style="background:${NAVY};padding:28px 32px;">
+            <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+              <td style="padding-right:10px;">${logoMarkSvg(30, LIME)}</td>
+              <td style="font-size:22px;font-weight:900;letter-spacing:-0.5px;color:#ffffff;">Chase<span style="color:${LIME};">Laundry</span></td>
+            </tr></table>
+          </td></tr>
+          <tr><td style="padding:36px 32px;">${innerHtml}</td></tr>
+          <tr><td style="padding:20px 32px 28px;border-top:1px solid #EEF0F4;">
+            <p style="margin:0 0 4px;font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:${GRAY};">More Life. Less Laundry.</p>
+            <p style="margin:0;font-size:12px;color:${GRAY};">ChaseLaundry · 1 Kim Seng Promenade, Singapore 237994 · chaselaundry.com</p>
+          </td></tr>
+        </table>
+      </td></tr>
+    </table>
+  </body></html>`;
+}
+
+export function otpEmail(code) {
+  const digits = code.split('').map((d) =>
+    `<td style="width:38px;height:46px;background:#F4F5F8;border-radius:8px;text-align:center;vertical-align:middle;font-size:22px;font-weight:900;color:${NAVY};font-family:monospace;">${d}</td>`
+  ).join(`<td style="width:8px;"></td>`);
+  const html = emailShell(`
+    <p style="margin:0 0 6px;font-size:20px;font-weight:900;color:${NAVY};">Your login code</p>
+    <p style="margin:0 0 24px;font-size:14px;color:${GRAY};line-height:1.5;">Enter this code to sign in to ChaseLaundry. It expires in 5 minutes.</p>
+    <table role="presentation" cellpadding="0" cellspacing="0" style="margin-bottom:24px;"><tr>${digits}</tr></table>
+    <p style="margin:0;font-size:12px;color:${GRAY};line-height:1.5;">Didn't request this? You can safely ignore this email — your account is still secure.</p>
+  `);
+  return { subject: 'Your ChaseLaundry login code', body: `Your one-time login code is ${code}. It expires in 5 minutes.`, html };
+}
+
+export function referralEmail({ inviterName, code, rewardLabel = 'S$5.00' }) {
+  const name = inviterName || 'A friend';
+  const html = emailShell(`
+    <p style="margin:0 0 6px;font-size:20px;font-weight:900;color:${NAVY};">${name} thinks you'll love ChaseLaundry</p>
+    <p style="margin:0 0 24px;font-size:14px;color:${GRAY};line-height:1.5;">Free pickup &amp; delivery laundry and dry cleaning, right to your door. Sign up with the code below and you'll both get ${rewardLabel} credit once you place your first order.</p>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F4F5F8;border-radius:12px;margin-bottom:20px;"><tr><td style="padding:18px 20px;text-align:center;">
+      <p style="margin:0 0 6px;font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:${GRAY};">Referral code</p>
+      <p style="margin:0;font-size:26px;font-weight:900;letter-spacing:2px;color:${NAVY};font-family:monospace;">${code}</p>
+    </td></tr></table>
+    <table role="presentation" cellpadding="0" cellspacing="0"><tr><td style="background:${LIME_D};border-radius:10px;">
+      <span style="display:inline-block;padding:13px 28px;font-size:14px;font-weight:800;color:${NAVY};">Get ${rewardLabel} credit → chaselaundry.com</span>
+    </td></tr></table>
+  `);
+  return {
+    subject: `${name} invited you to ChaseLaundry — get ${rewardLabel} credit`,
+    body: `${name} thinks you'll love ChaseLaundry and wants to give you ${rewardLabel} credit on your first order.\n\nUse referral code ${code} when you sign up — you'll both get ${rewardLabel} once you place your first order.`,
+    html,
+  };
 }
 
 // --- Payments (Stripe-shaped) ---
